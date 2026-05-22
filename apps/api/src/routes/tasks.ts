@@ -96,7 +96,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       .returning();
     if (!task) return reply.notFound('Task not found');
 
-    emitTaskEvent(task.id, task.sessionId, 'task_failed', { taskId: task.id, error: 'Task was cancelled by user' });
+    emitTaskEvent(task.id, task.sessionId, 'task_failed', { taskId: task.id, error: 'Agent is stopped' });
 
     return { success: true, data: task };
   });

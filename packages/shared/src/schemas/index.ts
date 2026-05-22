@@ -83,7 +83,7 @@ export const JwtPayloadSchema = z.object({
 
 // ── Model config schema ────────────────────────────────────────
 export const ModelConfigSchema = z.object({
-  provider: z.enum(['ollama']),
+  provider: z.enum(['ollama', 'openai', 'anthropic', 'google']),
   model: z.string(),
   maxTokens: z.number().int().positive().optional(),
   temperature: z.number().min(0).max(2).optional(),

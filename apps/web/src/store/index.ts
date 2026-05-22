@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import type { Session, Task, Message, AgentEvent } from '@arp/shared';
+import type { Session, Task, Message, AgentEvent, TaskStatus } from '@arp/shared';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
 
@@ -26,6 +26,22 @@ function cleanTitleFromMessage(content: string): string {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
+function isDuplicateAgentEvent(eventsList: AgentEvent[], newEvent: AgentEvent): boolean {
+  if (eventsList.some(e => e.id === newEvent.id)) return true;
+
+  const normalizePayload = (p: any) => {
+    if (!p) return '';
+    const { eventId, timestamp, duration, ...rest } = p;
+    return JSON.stringify(rest);
+  };
+
+  const newNormalized = normalizePayload(newEvent.payload);
+  return eventsList.some(e => {
+    if (e.type !== newEvent.type) return false;
+    return normalizePayload(e.payload) === newNormalized;
+  });
+}
+
 interface SettingsConfig {
   models: {
     low: { provider: string; model: string };
@@ -35,6 +51,9 @@ interface SettingsConfig {
   };
   keys: {
     ollamaBaseUrl: string;
+    openaiApiKey?: string;
+    anthropicApiKey?: string;
+    googleApiKey?: string;
   };
   availableProviders: string[];
 }
@@ -56,6 +75,7 @@ interface AppState {
   events: AgentEvent[];
   streamingText: string;
   isStreaming: boolean;
+  activeWs: WebSocket | null;
 
   // UI
   activePanel: 'chat' | 'editor' | 'terminal' | 'context' | 'graph' | 'settings';
@@ -72,6 +92,12 @@ interface AppState {
   // Theme
   theme: 'obsidian' | 'nord' | 'matrix' | 'midnight' | 'light-glass' | 'light-nord';
   setTheme: (theme: 'obsidian' | 'nord' | 'matrix' | 'midnight' | 'light-glass' | 'light-nord') => void;
+
+  // Workspace Files
+  activeFile: string | null;
+  activeFileContent: string | null;
+  activeFileLoading: boolean;
+  workspaceFiles: string[];
 
   // Actions
   fetchSessions: () => Promise<void>;
@@ -94,6 +120,11 @@ interface AppState {
   setActiveTaskId: (id: string) => Promise<void>;
   startIndexing: (workspaceDir: string) => Promise<void>;
   checkIndexingStatus: (workspaceDir: string, pollCount?: number) => Promise<void>;
+
+  fetchFileContent: (filePath: string) => Promise<void>;
+  saveFileContent: (filePath: string, content: string) => Promise<boolean>;
+  fetchWorkspaceFiles: () => Promise<void>;
+  connectTaskStream: (taskId: string, sessionId: string) => void;
 }
 
 export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) => ({
@@ -106,6 +137,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   events: [],
   streamingText: '',
   isStreaming: false,
+  activeWs: null,
   activePanel: 'chat',
   activeRightTab: 'timeline',
   sidebarOpen: true,
@@ -119,6 +151,11 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     localStorage.setItem('arp_theme', theme);
     set({ theme });
   },
+
+  activeFile: null,
+  activeFileContent: null,
+  activeFileLoading: false,
+  workspaceFiles: [],
 
   fetchSessions: async () => {
     set({ loadingSessions: true });
@@ -195,7 +232,27 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   },
 
   setActiveSession: async (id) => {
-    set({ activeSessionId: id, messages: [], tasks: [], events: [], streamingText: '', isStreaming: false, activePanel: 'chat' });
+    // Close any active WebSocket connection to prevent socket/listener leaks
+    const currentWs = get().activeWs;
+    if (currentWs) {
+      try {
+        currentWs.close();
+      } catch (err) {
+        console.error('Failed to close active websocket connection', err);
+      }
+    }
+
+    set({ 
+      activeSessionId: id, 
+      messages: [], 
+      tasks: [], 
+      events: [], 
+      streamingText: '', 
+      isStreaming: false, 
+      activeWs: null,
+      activePanel: 'chat' 
+    });
+
     // Fetch messages
     const res = await fetch(`${API_URL}/api/sessions/${id}/messages`);
     const json = await res.json();
@@ -215,6 +272,12 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
         const eventsJson = await eventsRes.json();
         // L-9: Cap events loaded from history to prevent unbounded state
         set({ events: (eventsJson.data ?? []).slice(-200) });
+
+        // Auto-reconnect if the task is currently active/running
+        const runningStatuses: TaskStatus[] = ['queued', 'planning', 'executing', 'validating', 'reflecting'];
+        if (runningStatuses.includes(activeTask.status)) {
+          get().connectTaskStream(activeTask.id, id);
+        }
       } else {
         set({ activeTaskId: null, events: [] });
       }
@@ -226,6 +289,9 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     const session = get().sessions.find(s => s.id === id);
     if (session?.workspaceDir) {
       get().checkIndexingStatus(session.workspaceDir);
+      get().fetchWorkspaceFiles();
+    } else {
+      set({ workspaceFiles: [], activeFile: null, activeFileContent: null });
     }
   },
 
@@ -301,140 +367,8 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
     set(state => ({ tasks: [task, ...state.tasks], activeTaskId: task.id, events: [] }));
 
-    // Subscribe to WebSocket stream for live events
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsBase = API_URL.replace(/^https?/, wsProtocol) || `${wsProtocol}//${window.location.host}`;
-    const ws = new WebSocket(`${wsBase}/api/stream/task/${task.id}/ws`);
-
-    ws.onmessage = async (evt) => {
-      let msg: { type: string; data: Record<string, unknown> };
-      try { msg = JSON.parse(evt.data); } catch { return; }
-      const { type, data } = msg;
-
-      if (type === 'ping' || type === 'history_end') return;
-
-      const agentEvent: AgentEvent = {
-        id: (data.eventId as string) || crypto.randomUUID(),
-        taskId: task.id,
-        sessionId,
-        type: type as AgentEvent['type'],
-        payload: data,
-        timestamp: (data.timestamp as string | Date) ? new Date(data.timestamp as string) : new Date(),
-      };
-
-      if (type === 'token_chunk') {
-        get().appendStreamingText((data.text as string) ?? '');
-        return; // Don't add token chunks to event list
-      }
-
-      if (type === 'task_started') {
-        set(state => ({
-          tasks: state.tasks.map(t => t.id === task.id ? { ...t, status: 'planning' } : t),
-          events: [...state.events, agentEvent],
-        }));
-        return;
-      }
-
-      if (type === 'task_completed') {
-        // Defer to let any queued token_chunk events flush before capturing streamingText
-        await new Promise(r => setTimeout(r, 0));
-        ws.close();
-
-        const finalText = get().streamingText;
-        const assistantMsg: Message = {
-          id: crypto.randomUUID(),
-          sessionId,
-          role: 'assistant',
-          content: finalText,
-          createdAt: new Date(),
-        };
-        set(state => ({
-          messages: [...state.messages, assistantMsg],
-          isStreaming: false,
-          streamingText: '',
-          tasks: state.tasks.map(t => t.id === task.id ? {
-            ...t,
-            status: 'completed',
-            promptTokens: (data.promptTokens as number) ?? (data.totalTokens ? Math.round((data.totalTokens as number) * 0.7) : 0),
-            completionTokens: (data.completionTokens as number) ?? (data.totalTokens ? Math.round((data.totalTokens as number) * 0.3) : 0),
-            totalTokens: (data.totalTokens as number) || 0,
-            estimatedCostUsd: (data.cost as number) || 0,
-            result: { success: true, output: (data.output as string) || finalText || '', retryCount: t.result?.retryCount || 0 },
-          } : t),
-          events: [...state.events, agentEvent],
-        }));
-
-        // Sync from DB for full task record
-        try {
-          const res = await fetch(`${API_URL}/api/tasks/${task.id}`);
-          const json = await res.json();
-          if (json.success && json.data) {
-            const updatedTask = json.data as Task;
-            set(state => ({ tasks: state.tasks.map(t => t.id === task.id ? updatedTask : t) }));
-          }
-        } catch {}
-        return;
-      }
-
-      if (type === 'task_failed') {
-        ws.close();
-        const errorMsg = (data.error as string) || 'Unknown error';
-        const isCancelled = (data.cancelled as boolean) === true || errorMsg.toLowerCase() === 'task was cancelled by user';
-        const assistantErrorMsg: Message = {
-          id: crypto.randomUUID(),
-          sessionId,
-          role: 'assistant',
-          content: isCancelled
-            ? `⚠️ **Task Cancelled**: ${errorMsg}`
-            : `❌ **Error: Task Execution Failed**\n\n\`\`\`\n${errorMsg}\n\`\`\``,
-          createdAt: new Date(),
-        };
-        set(state => ({
-          messages: [...state.messages, assistantErrorMsg],
-          isStreaming: false,
-          tasks: state.tasks.map(t => t.id === task.id ? {
-            ...t,
-            status: isCancelled ? 'cancelled' : 'failed',
-            result: { success: false, output: '', failureReason: errorMsg, retryCount: t.result?.retryCount || 0 },
-          } : t),
-          events: [...state.events, agentEvent],
-        }));
-
-        // Sync from DB
-        try {
-          const res = await fetch(`${API_URL}/api/tasks/${task.id}`);
-          const json = await res.json();
-          if (json.success && json.data) {
-            const updatedTask = json.data as Task;
-            set(state => ({ tasks: state.tasks.map(t => t.id === task.id ? updatedTask : t) }));
-          }
-        } catch {}
-        return;
-      }
-
-      if (type === 'tool_called') {
-        set(state => ({
-          tasks: state.tasks.map(t => t.id === task.id ? { ...t, status: 'executing' } : t),
-          events: [...state.events, agentEvent],
-        }));
-        return;
-      }
-
-      // All other events (tool_result, context_assembled, etc.)
-      set(state => ({ events: [...state.events, agentEvent] }));
-    };
-
-    ws.onerror = () => {
-      ws.close();
-      set({ isStreaming: false });
-    };
-
-    ws.onclose = (ev) => {
-      // If closed unexpectedly while still streaming, reset state
-      if (get().isStreaming && ev.code !== 1000) {
-        set({ isStreaming: false });
-      }
-    };
+    // Delegate live streaming to connectTaskStream
+    get().connectTaskStream(task.id, sessionId);
   },
 
   setActivePanel: (panel) => set({ activePanel: panel }),
@@ -574,5 +508,297 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     } catch (err) {
       console.error('Failed to check indexing status', err);
     }
+  },
+
+  fetchFileContent: async (filePath) => {
+    const session = get().sessions.find(s => s.id === get().activeSessionId);
+    if (!session?.workspaceDir) return;
+    set({ activeFileLoading: true, activeFile: filePath });
+    try {
+      const res = await fetch(`${API_URL}/api/context/file-content?workspaceDir=${encodeURIComponent(session.workspaceDir)}&path=${encodeURIComponent(filePath)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        set({ activeFileContent: json.data.content });
+      } else {
+        set({ activeFileContent: null });
+      }
+    } catch (err) {
+      console.error('Failed to fetch file content', filePath, err);
+      set({ activeFileContent: null });
+    } finally {
+      set({ activeFileLoading: false });
+    }
+  },
+
+  saveFileContent: async (filePath, content) => {
+    const session = get().sessions.find(s => s.id === get().activeSessionId);
+    if (!session?.workspaceDir) return false;
+    try {
+      const res = await fetch(`${API_URL}/api/context/file-save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceDir: session.workspaceDir,
+          path: filePath,
+          content,
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        set({ activeFileContent: content });
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to save file content', filePath, err);
+    }
+    return false;
+  },
+
+  fetchWorkspaceFiles: async () => {
+    const session = get().sessions.find(s => s.id === get().activeSessionId);
+    if (!session?.workspaceDir) {
+      set({ workspaceFiles: [] });
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/context/files?workspaceDir=${encodeURIComponent(session.workspaceDir)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        set({ workspaceFiles: json.data });
+      } else {
+        set({ workspaceFiles: [] });
+      }
+    } catch (err) {
+      console.error('Failed to fetch workspace files', err);
+      set({ workspaceFiles: [] });
+    }
+  },
+
+  connectTaskStream: (taskId: string, sessionId: string) => {
+    // 1. Close any existing WebSocket connection for different tasks
+    const currentWs = get().activeWs;
+    if (currentWs) {
+      if (currentWs.url.includes(`/api/stream/task/${taskId}/ws`)) {
+        // Already connected to the stream for this task
+        return;
+      }
+      try {
+        currentWs.close();
+      } catch (err) {
+        console.error('Failed to close active websocket connection', err);
+      }
+    }
+
+    set({ isStreaming: true, streamingText: '' });
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsBase = API_URL.replace(/^https?/, wsProtocol) || `${wsProtocol}//${window.location.host}`;
+    const ws = new WebSocket(`${wsBase}/api/stream/task/${taskId}/ws`);
+    set({ activeWs: ws });
+
+    ws.onmessage = async (evt) => {
+      let msg: { type: string; data: Record<string, unknown> };
+      try { msg = JSON.parse(evt.data); } catch { return; }
+      const { type, data } = msg;
+
+      if (type === 'ping' || type === 'history_end') return;
+
+      const agentEvent: AgentEvent = {
+        id: (data.eventId as string) || crypto.randomUUID(),
+        taskId,
+        sessionId,
+        type: type as AgentEvent['type'],
+        payload: data,
+        timestamp: (data.timestamp as string | Date) ? new Date(data.timestamp as string) : new Date(),
+      };
+
+      if (type === 'token_chunk') {
+        get().appendStreamingText((data.text as string) ?? '');
+        return; // Don't add token chunks to event list
+      }
+
+      // Check if event is duplicate
+      const isDuplicate = isDuplicateAgentEvent(get().events, agentEvent);
+
+      if (type === 'task_started') {
+        set(state => {
+          const nextEvents = isDuplicate ? state.events : [...state.events, agentEvent];
+          return {
+            tasks: state.tasks.map(t => t.id === taskId ? { ...t, status: 'planning' } : t),
+            events: nextEvents,
+          };
+        });
+        return;
+      }
+
+      if (type === 'task_completed') {
+        // Defer to let any queued token_chunk events flush before capturing streamingText
+        await new Promise(r => setTimeout(r, 0));
+        ws.close(1000);
+
+        if (get().activeWs === ws) {
+          set({ activeWs: null });
+        }
+
+        const finalText = get().streamingText;
+        const fallbackText = (data.output as string) || finalText || '';
+        
+        // Prevent duplicate assistant message
+        const hasAssistantMessage = get().messages.some(m => 
+          m.role === 'assistant' && (m.content === fallbackText || (data.output && m.content === data.output))
+        );
+
+        set(state => {
+          const nextEvents = isDuplicate ? state.events : [...state.events, agentEvent];
+          const nextMessages = hasAssistantMessage 
+            ? state.messages 
+            : [...state.messages, {
+                id: crypto.randomUUID(),
+                sessionId,
+                role: 'assistant',
+                content: fallbackText,
+                createdAt: new Date(),
+              } as Message];
+          
+          return {
+            messages: nextMessages,
+            isStreaming: false,
+            streamingText: '',
+            tasks: state.tasks.map(t => t.id === taskId ? {
+              ...t,
+              status: 'completed',
+              promptTokens: (data.promptTokens as number) ?? (data.totalTokens ? Math.round((data.totalTokens as number) * 0.7) : 0),
+              completionTokens: (data.completionTokens as number) ?? (data.totalTokens ? Math.round((data.totalTokens as number) * 0.3) : 0),
+              totalTokens: (data.totalTokens as number) || 0,
+              estimatedCostUsd: (data.cost as number) || 0,
+              result: { success: true, output: (data.output as string) || fallbackText, retryCount: t.result?.retryCount || 0 },
+            } : t),
+            events: nextEvents,
+          };
+        });
+
+        // Sync from DB for full task record
+        try {
+          const res = await fetch(`${API_URL}/api/tasks/${taskId}`);
+          const json = await res.json();
+          if (json.success && json.data) {
+            const updatedTask = json.data as Task;
+            set(state => ({ tasks: state.tasks.map(t => t.id === taskId ? updatedTask : t) }));
+          }
+        } catch {}
+
+        // Sync messages from DB to ensure UI shows the latest assistant message
+        try {
+          const res = await fetch(`${API_URL}/api/sessions/${sessionId}/messages`);
+          const json = await res.json();
+          if (json.success && json.data) {
+            set({ messages: json.data });
+          }
+        } catch (err) {
+          console.error('Failed to sync messages:', err);
+        }
+        return;
+      }
+
+      if (type === 'task_failed') {
+        ws.close(1000);
+        if (get().activeWs === ws) {
+          set({ activeWs: null });
+        }
+        const errorMsg = (data.error as string) || 'Unknown error';
+        const isCancelled = (data.cancelled as boolean) === true || errorMsg.toLowerCase() === 'task was cancelled by user' || errorMsg.toLowerCase() === 'agent is stopped';
+
+        const fallbackText = isCancelled
+          ? `Agent is stopped`
+          : `❌ **Error: Task Execution Failed**\n\n\`\`\`\n${errorMsg}\n\`\`\``;
+
+        // Prevent duplicate assistant message
+        const hasAssistantMessage = get().messages.some(m => 
+          m.role === 'assistant' && (
+            m.content.includes(errorMsg) || 
+            (isCancelled && (m.content.includes('Task Cancelled') || m.content.includes('Agent is stopped')))
+          )
+        );
+
+        set(state => {
+          const nextEvents = isDuplicate ? state.events : [...state.events, agentEvent];
+          const nextMessages = hasAssistantMessage 
+            ? state.messages 
+            : [...state.messages, {
+                id: crypto.randomUUID(),
+                sessionId,
+                role: 'assistant',
+                content: fallbackText,
+                createdAt: new Date(),
+              } as Message];
+
+          return {
+            messages: nextMessages,
+            isStreaming: false,
+            tasks: state.tasks.map(t => t.id === taskId ? {
+              ...t,
+              status: isCancelled ? 'cancelled' : 'failed',
+              result: { success: false, output: '', failureReason: errorMsg, retryCount: t.result?.retryCount || 0 },
+            } : t),
+            events: nextEvents,
+          };
+        });
+
+        // Sync from DB
+        try {
+          const res = await fetch(`${API_URL}/api/tasks/${taskId}`);
+          const json = await res.json();
+          if (json.success && json.data) {
+            const updatedTask = json.data as Task;
+            set(state => ({ tasks: state.tasks.map(t => t.id === taskId ? updatedTask : t) }));
+          }
+        } catch {}
+
+        // Sync messages from DB to ensure UI shows the latest error or stopped message
+        try {
+          const res = await fetch(`${API_URL}/api/sessions/${sessionId}/messages`);
+          const json = await res.json();
+          if (json.success && json.data) {
+            set({ messages: json.data });
+          }
+        } catch (err) {
+          console.error('Failed to sync messages on failure:', err);
+        }
+        return;
+      }
+
+      if (type === 'tool_called') {
+        set(state => {
+          const nextEvents = isDuplicate ? state.events : [...state.events, agentEvent];
+          return {
+            tasks: state.tasks.map(t => t.id === taskId ? { ...t, status: 'executing' } : t),
+            events: nextEvents,
+          };
+        });
+        return;
+      }
+
+      // All other events (tool_result, context_assembled, etc.)
+      if (!isDuplicate) {
+        set(state => ({ events: [...state.events, agentEvent] }));
+      }
+    };
+
+    ws.onerror = () => {
+      ws.close(1000);
+      if (get().activeWs === ws) {
+        set({ isStreaming: false, activeWs: null });
+      }
+    };
+
+    ws.onclose = (ev) => {
+      if (get().activeWs === ws) {
+        set({ activeWs: null });
+        // If closed unexpectedly while still streaming, reset state
+        if (get().isStreaming && ev.code !== 1000) {
+          set({ isStreaming: false });
+        }
+      }
+    };
   },
 })));

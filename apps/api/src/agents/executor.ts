@@ -95,8 +95,9 @@ export async function executeTask(taskId: string): Promise<void> {
       }) as any;
     }
 
-    // Compile prompt with context retrieval
-    if (workspaceDir) {
+    // Compile prompt with context retrieval (skip for conversational greetings/acknowledgments)
+    const skipRetrieval = shouldSkipContext(description);
+    if (workspaceDir && !skipRetrieval) {
       try {
         contextItems = await retrieveContext({
           query: description,
@@ -106,20 +107,9 @@ export async function executeTask(taskId: string): Promise<void> {
       } catch (ctxErr) {
         console.error('[Executor] Error retrieving context:', ctxErr);
       }
+    } else if (skipRetrieval) {
+      console.log(`[Executor] Skipping context retrieval for conversational query: "${description}"`);
     }
-
-    // Save and emit context_assembled event
-    const assembledPayload = {
-      items: contextItems.map(item => ({
-        id: item.id,
-        type: item.type,
-        path: item.path,
-        relevanceScore: item.relevanceScore,
-        tokenCount: item.tokenCount,
-      }))
-    };
-    await saveEvent(taskId, sessionId, 'context_assembled', assembledPayload);
-    emitTaskEvent(taskId, sessionId, 'context_assembled', assembledPayload);
 
     const compiled = compilePrompt({
       taskDescription: description,
@@ -147,6 +137,24 @@ export async function executeTask(taskId: string): Promise<void> {
       model: route.model,
       workspaceDir: workspaceDir ?? undefined,
     });
+
+    // Save and emit context_assembled event
+    const assembledPayload = {
+      systemPrompt: compiled.system,
+      totalTokens: compiled.totalTokens,
+      compressionApplied: compiled.compressionApplied,
+      items: contextItems.map(item => ({
+        id: item.id,
+        type: item.type,
+        path: item.path,
+        content: item.content,
+        relevanceScore: item.relevanceScore,
+        tokenCount: item.tokenCount,
+        included: compiled.context.some(c => c.id === item.id),
+      }))
+    };
+    await saveEvent(taskId, sessionId, 'context_assembled', assembledPayload);
+    emitTaskEvent(taskId, sessionId, 'context_assembled', assembledPayload);
 
     setTaskStatus(taskId, 'executing');
     await db.update(tasks).set({ status: 'executing' }).where(eq(tasks.id, taskId));
@@ -240,7 +248,7 @@ export async function executeTask(taskId: string): Promise<void> {
     }).where(eq(tasks.id, taskId));
 
     setTaskStatus(taskId, 'completed');
-    await saveEvent(taskId, sessionId, 'task_completed', { taskId, totalTokens, cost, promptTokens, completionTokens });
+    await saveEvent(taskId, sessionId, 'task_completed', { taskId, totalTokens, cost, promptTokens, completionTokens, output: fullText });
     emitTaskEvent(taskId, sessionId, 'task_completed', { taskId, totalTokens, cost, promptTokens, completionTokens, output: fullText });
 
   } catch (err) {
@@ -275,14 +283,14 @@ export async function executeTask(taskId: string): Promise<void> {
       sessionId,
       role: 'assistant',
       content: isCancelled 
-        ? `⚠️ **Task Cancelled**: Task was cancelled by user`
+        ? `Agent is stopped`
         : `❌ **Error: Task Execution Failed**\n\n\`\`\`\n${errorMsg}\n\`\`\``,
     }).catch(dbErr => console.error('[Executor] Failed to save error message to db:', dbErr));
 
     if (isCancelled) {
       setTaskStatus(taskId, 'cancelled');
-      await saveEvent(taskId, sessionId, 'task_failed', { taskId, error: 'Task was cancelled by user' });
-      emitTaskEvent(taskId, sessionId, 'task_failed', { taskId, error: 'Task was cancelled by user' });
+      await saveEvent(taskId, sessionId, 'task_failed', { taskId, error: 'Agent is stopped' });
+      emitTaskEvent(taskId, sessionId, 'task_failed', { taskId, error: 'Agent is stopped' });
       return;
     }
 
@@ -307,4 +315,31 @@ async function saveEvent(
     type: type as never,
     payload,
   });
+}
+
+function shouldSkipContext(query: string): boolean {
+  const trimmed = query.trim().toLowerCase();
+  
+  // 1. Common short greetings/conversational phrases
+  const conversationalPatterns = [
+    /^(hi|hello|hey|greetings|howdy|yo|hiya|morning|afternoon|evening)(\s+.*)?$/i,
+    /^(thanks|thank you|awesome|great|ok|okay|cool|yes|no|sure|yep|nope|fine|perfect)(\s+.*)?$/i,
+    /^(help|what is this|who are you|what can you do|what is your name)(\s+.*)?$/i,
+  ];
+  
+  const isPatternMatch = conversationalPatterns.some(pat => pat.test(trimmed));
+  if (isPatternMatch) return true;
+
+  // 2. Short queries that don't refer to code keywords or file extensions/paths
+  if (trimmed.length < 15) {
+    const codeKeywords = ['code', 'file', 'git', 'bug', 'fix', 'error', 'run', 'test', 'write', 'create', 'make', 'add', 'find', 'search'];
+    const hasCodeKeyword = codeKeywords.some(kw => trimmed.includes(kw));
+    const hasFileExt = /\.[a-z0-9]{1,4}$/i.test(trimmed);
+    const hasPathSlash = /[\/\\]/.test(trimmed);
+    if (!hasCodeKeyword && !hasFileExt && !hasPathSlash) {
+      return true;
+    }
+  }
+
+  return false;
 }

@@ -149,12 +149,7 @@ function getEditStats(toolName: string, input: any) {
 }
 
 function formatTaskHeader(task: any) {
-  if (!task) return '';
-  const title = task.title || task.description || 'execute task';
-  if (title.length > 60) {
-    return title.slice(0, 57) + '...';
-  }
-  return title;
+  return 'Execution Details';
 }
 
 function getToolCategory(toolName: string): string {
@@ -569,6 +564,22 @@ function InlineTimeline({ task, isLive = false, liveEvents = [], messageContent 
     elements.push(
       <div key="para-live-empty" style={{ color: 'var(--text-primary)', fontSize: '14px', lineHeight: 1.6 }}>
         <span style={{ display: 'inline-block', width: '8px', height: '14px', background: 'var(--text-primary)', animation: 'pulse 1s infinite' }} />
+      </div>
+    );
+  }
+
+  if (toolCallPairs.length === 0) {
+    return (
+      <div style={{ marginBottom: '16px' }}>
+        {loading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '12px', padding: '8px 12px' }}>
+            <Loader2 size={14} className="animate-spin" />
+            <span>Loading execution history...</span>
+          </div>
+        )}
+        <div style={{ marginTop: '4px' }}>
+          {elements}
+        </div>
       </div>
     );
   }
@@ -1077,11 +1088,6 @@ export function ChatPanel() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
       
-      {/* Header Path */}
-      <div style={{ padding: '16px 24px', color: 'var(--text-muted)', fontSize: '12px', display: 'flex', gap: '8px' }}>
-        <span>ARP</span> / <span>{activeSession?.title || 'Conversation'}</span>
-      </div>
-
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px 120px 24px' }}>
         <div style={{ maxWidth: '800px', margin: '0 auto' }}>

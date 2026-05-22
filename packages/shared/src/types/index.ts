@@ -153,7 +153,7 @@ export interface Message {
 }
 
 // Model provider types
-export type ModelProvider = 'ollama';
+export type ModelProvider = 'ollama' | 'openai' | 'anthropic' | 'google';
 
 export interface ModelConfig {
   provider: ModelProvider;

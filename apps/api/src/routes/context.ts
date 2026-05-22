@@ -3,6 +3,8 @@ import { startIndexing, getIndexingStatus } from '../agents/context/indexer.js';
 import { watchWorkspace } from '../lib/watcher.js';
 import { z } from 'zod';
 import { glob } from 'glob';
+import { readFile, writeFile } from 'fs/promises';
+import { resolve, relative, isAbsolute } from 'path';
 
 export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   // POST /api/context/index
@@ -80,6 +82,61 @@ export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
         ],
       });
       return { success: true, data: files };
+    } catch (err: any) {
+      return reply.code(500).send({ success: false, error: err.message || String(err) });
+    }
+  });
+
+  // GET /api/context/file-content
+  fastify.get('/file-content', async (request, reply) => {
+    const querySchema = z.object({
+      workspaceDir: z.string(),
+      path: z.string(),
+    });
+
+    const parsed = querySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ success: false, error: 'Missing or invalid parameters' });
+    }
+
+    const { workspaceDir, path } = parsed.data;
+    try {
+      const absolutePath = resolve(workspaceDir, path);
+      const rel = relative(workspaceDir, absolutePath);
+      if (rel.startsWith('..') || isAbsolute(rel)) {
+        return reply.code(400).send({ success: false, error: 'Path traversal detected' });
+      }
+
+      const content = await readFile(absolutePath, 'utf8');
+      return { success: true, data: { content } };
+    } catch (err: any) {
+      return reply.code(500).send({ success: false, error: err.message || String(err) });
+    }
+  });
+
+  // POST /api/context/file-save
+  fastify.post('/file-save', async (request, reply) => {
+    const bodySchema = z.object({
+      workspaceDir: z.string(),
+      path: z.string(),
+      content: z.string(),
+    });
+
+    const parsed = bodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ success: false, error: 'Missing or invalid parameters' });
+    }
+
+    const { workspaceDir, path, content } = parsed.data;
+    try {
+      const absolutePath = resolve(workspaceDir, path);
+      const rel = relative(workspaceDir, absolutePath);
+      if (rel.startsWith('..') || isAbsolute(rel)) {
+        return reply.code(400).send({ success: false, error: 'Path traversal detected' });
+      }
+
+      await writeFile(absolutePath, content, 'utf8');
+      return { success: true, message: 'File saved successfully' };
     } catch (err: any) {
       return reply.code(500).send({ success: false, error: err.message || String(err) });
     }

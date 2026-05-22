@@ -3,6 +3,7 @@ import { useAppStore } from '../store/index.js';
 import { formatDistanceToNow } from 'date-fns';
 import { 
   Folder, 
+  File,
   Plus, 
   RefreshCw, 
   Settings, 
@@ -20,6 +21,8 @@ interface Project {
   name: string;
 }
 
+
+
 export function Sidebar() {
   const { 
     sessions, 
@@ -32,9 +35,8 @@ export function Sidebar() {
     activePanel,
     setActivePanel,
     deleteSession,
-    updateSessionTitle
+    updateSessionTitle,
   } = useAppStore();
-
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
@@ -102,6 +104,7 @@ export function Sidebar() {
   };
 
   const projects = getProjects();
+  const activeSession = sessions.find(s => s.id === activeSessionId);
 
   return (
     <aside style={{
@@ -400,7 +403,11 @@ export function Sidebar() {
                             className="session-row"
                             onClick={() => {
                               if (editingSessionId !== session.id) {
-                                setActiveSession(session.id);
+                                if (activeSessionId !== session.id) {
+                                  setActiveSession(session.id);
+                                } else if (activePanel !== 'chat') {
+                                  setActivePanel('chat');
+                                }
                               }
                             }}
                           >
@@ -549,6 +556,8 @@ export function Sidebar() {
 
           </div>
         )}
+
+
 
       </div>
       

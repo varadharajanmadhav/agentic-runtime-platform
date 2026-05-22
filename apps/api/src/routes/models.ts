@@ -21,6 +21,9 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
     // Mask keys
     const maskedKeys = {
       ollamaBaseUrl: keys.ollamaBaseUrl || '',
+      openaiApiKey: keys.openaiApiKey ? '*****' : '',
+      anthropicApiKey: keys.anthropicApiKey ? '*****' : '',
+      googleApiKey: keys.googleApiKey ? '*****' : '',
     };
 
     return {
@@ -41,7 +44,7 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/config', async (request, reply) => {
     // M-2: Validate model config body with Zod schema
     const RouteConfigSchema = z.object({
-      provider: z.enum(['ollama']),
+      provider: z.enum(['ollama', 'openai', 'anthropic', 'google']),
       model: z.string().min(1).max(200),
     });
     const BodySchema = z.object({
@@ -53,6 +56,9 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
       }).optional(),
       keys: z.object({
         ollamaBaseUrl: z.string().url().optional().or(z.literal('')),
+        openaiApiKey: z.string().optional(),
+        anthropicApiKey: z.string().optional(),
+        googleApiKey: z.string().optional(),
       }).optional(),
     });
 
@@ -62,9 +68,13 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const body = parsed.data;
     const currentConfig = loadSavedConfig();
+    const currentKeys = currentConfig.keys || {};
 
     const newKeys = {
-      ollamaBaseUrl: body.keys?.ollamaBaseUrl !== undefined ? body.keys.ollamaBaseUrl : (currentConfig.keys?.ollamaBaseUrl || ''),
+      ollamaBaseUrl: body.keys?.ollamaBaseUrl !== undefined ? body.keys.ollamaBaseUrl : (currentKeys.ollamaBaseUrl || ''),
+      openaiApiKey: body.keys?.openaiApiKey !== undefined && body.keys.openaiApiKey !== '*****' ? body.keys.openaiApiKey : (currentKeys.openaiApiKey || ''),
+      anthropicApiKey: body.keys?.anthropicApiKey !== undefined && body.keys.anthropicApiKey !== '*****' ? body.keys.anthropicApiKey : (currentKeys.anthropicApiKey || ''),
+      googleApiKey: body.keys?.googleApiKey !== undefined && body.keys.googleApiKey !== '*****' ? body.keys.googleApiKey : (currentKeys.googleApiKey || ''),
     };
 
     const newConfig = {

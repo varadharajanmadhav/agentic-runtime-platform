@@ -15,6 +15,9 @@ export function SettingsPanel() {
   const [embedModel, setEmbedModel] = useState('nomic-embed-text');
 
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState('');
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [anthropicApiKey, setAnthropicApiKey] = useState('');
+  const [googleApiKey, setGoogleApiKey] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -22,16 +25,19 @@ export function SettingsPanel() {
   // Sync settings when loaded
   useEffect(() => {
     if (settings) {
-      setLowProvider('ollama');
-      setLowModel(settings.models.low.model);
-      setMedProvider('ollama');
-      setMedModel(settings.models.medium.model);
-      setHighProvider('ollama');
-      setHighModel(settings.models.high.model);
-      setEmbedProvider('ollama');
-      setEmbedModel(settings.models.embedding?.model || 'nomic-embed-text');
+      setLowProvider(settings.models?.low?.provider || 'ollama');
+      setLowModel(settings.models?.low?.model || 'qwen2.5-coder:7b');
+      setMedProvider(settings.models?.medium?.provider || 'ollama');
+      setMedModel(settings.models?.medium?.model || 'qwen2.5-coder:32b');
+      setHighProvider(settings.models?.high?.provider || 'ollama');
+      setHighModel(settings.models?.high?.model || 'qwen2.5-coder:32b');
+      setEmbedProvider(settings.models?.embedding?.provider || 'ollama');
+      setEmbedModel(settings.models?.embedding?.model || 'nomic-embed-text');
 
-      setOllamaBaseUrl(settings.keys.ollamaBaseUrl || '');
+      setOllamaBaseUrl(settings.keys?.ollamaBaseUrl || '');
+      setOpenaiApiKey(settings.keys?.openaiApiKey || '');
+      setAnthropicApiKey(settings.keys?.anthropicApiKey || '');
+      setGoogleApiKey(settings.keys?.googleApiKey || '');
     }
   }, [settings]);
 
@@ -41,14 +47,17 @@ export function SettingsPanel() {
     setSaveSuccess(false);
 
     const models = {
-      low: { provider: 'ollama', model: lowModel },
-      medium: { provider: 'ollama', model: medModel },
-      high: { provider: 'ollama', model: highModel },
-      embedding: { provider: 'ollama', model: embedModel }
+      low: { provider: lowProvider, model: lowModel },
+      medium: { provider: medProvider, model: medModel },
+      high: { provider: highProvider, model: highModel },
+      embedding: { provider: embedProvider, model: embedModel }
     };
 
     const keys = {
-      ollamaBaseUrl: ollamaBaseUrl
+      ollamaBaseUrl: ollamaBaseUrl,
+      openaiApiKey: openaiApiKey,
+      anthropicApiKey: anthropicApiKey,
+      googleApiKey: googleApiKey
     };
 
     const success = await saveSettings(models as any, keys as any);
@@ -138,21 +147,32 @@ export function SettingsPanel() {
               <div>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Low Complexity</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    padding: '0 16px',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    color: 'var(--text-primary)',
-                    minWidth: '120px'
-                  }}>
-                    Ollama
-                  </div>
+                  <select 
+                    className="input-base" 
+                    style={{ 
+                      minWidth: '140px', 
+                      background: 'var(--bg-input)', 
+                      color: 'var(--text-primary)', 
+                      border: '1px solid var(--border)', 
+                      borderRadius: '10px', 
+                      padding: '8px 12px',
+                      cursor: 'pointer'
+                    }} 
+                    value={lowProvider} 
+                    onChange={e => {
+                      const prov = e.target.value;
+                      setLowProvider(prov);
+                      if (prov === 'openai') setLowModel('gpt-4o-mini');
+                      else if (prov === 'anthropic') setLowModel('claude-3-5-haiku-latest');
+                      else if (prov === 'google') setLowModel('gemini-1.5-flash');
+                      else if (prov === 'ollama') setLowModel('qwen2.5-coder:7b');
+                    }}
+                  >
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="google">Google</option>
+                  </select>
                   <input className="input-base" style={{ flex: 1 }} value={lowModel} onChange={e => setLowModel(e.target.value)} placeholder="Model name (e.g. qwen2.5-coder:7b)" />
                 </div>
               </div>
@@ -161,21 +181,32 @@ export function SettingsPanel() {
               <div>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Medium Complexity</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    padding: '0 16px',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    color: 'var(--text-primary)',
-                    minWidth: '120px'
-                  }}>
-                    Ollama
-                  </div>
+                  <select 
+                    className="input-base" 
+                    style={{ 
+                      minWidth: '140px', 
+                      background: 'var(--bg-input)', 
+                      color: 'var(--text-primary)', 
+                      border: '1px solid var(--border)', 
+                      borderRadius: '10px', 
+                      padding: '8px 12px',
+                      cursor: 'pointer'
+                    }} 
+                    value={medProvider} 
+                    onChange={e => {
+                      const prov = e.target.value;
+                      setMedProvider(prov);
+                      if (prov === 'openai') setMedModel('gpt-4o');
+                      else if (prov === 'anthropic') setMedModel('claude-3-5-sonnet-latest');
+                      else if (prov === 'google') setMedModel('gemini-1.5-pro');
+                      else if (prov === 'ollama') setMedModel('qwen2.5-coder:32b');
+                    }}
+                  >
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="google">Google</option>
+                  </select>
                   <input className="input-base" style={{ flex: 1 }} value={medModel} onChange={e => setMedModel(e.target.value)} placeholder="Model name (e.g. qwen2.5-coder:32b)" />
                 </div>
               </div>
@@ -184,21 +215,32 @@ export function SettingsPanel() {
               <div>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>High Complexity</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    padding: '0 16px',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    color: 'var(--text-primary)',
-                    minWidth: '120px'
-                  }}>
-                    Ollama
-                  </div>
+                  <select 
+                    className="input-base" 
+                    style={{ 
+                      minWidth: '140px', 
+                      background: 'var(--bg-input)', 
+                      color: 'var(--text-primary)', 
+                      border: '1px solid var(--border)', 
+                      borderRadius: '10px', 
+                      padding: '8px 12px',
+                      cursor: 'pointer'
+                    }} 
+                    value={highProvider} 
+                    onChange={e => {
+                      const prov = e.target.value;
+                      setHighProvider(prov);
+                      if (prov === 'openai') setHighModel('gpt-4o');
+                      else if (prov === 'anthropic') setHighModel('claude-3-5-sonnet-latest');
+                      else if (prov === 'google') setHighModel('gemini-1.5-pro');
+                      else if (prov === 'ollama') setHighModel('qwen2.5-coder:32b');
+                    }}
+                  >
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="google">Google</option>
+                  </select>
                   <input className="input-base" style={{ flex: 1 }} value={highModel} onChange={e => setHighModel(e.target.value)} placeholder="Model name (e.g. qwen2.5-coder:32b)" />
                 </div>
               </div>
@@ -207,28 +249,38 @@ export function SettingsPanel() {
               <div>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Embedding Model</label>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    padding: '0 16px',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    color: 'var(--text-primary)',
-                    minWidth: '120px'
-                  }}>
-                    Ollama
-                  </div>
+                  <select 
+                    className="input-base" 
+                    style={{ 
+                      minWidth: '140px', 
+                      background: 'var(--bg-input)', 
+                      color: 'var(--text-primary)', 
+                      border: '1px solid var(--border)', 
+                      borderRadius: '10px', 
+                      padding: '8px 12px',
+                      cursor: 'pointer'
+                    }} 
+                    value={embedProvider} 
+                    onChange={e => {
+                      const prov = e.target.value;
+                      setEmbedProvider(prov);
+                      if (prov === 'openai') setEmbedModel('text-embedding-3-small');
+                      else if (prov === 'google') setEmbedModel('text-embedding-004');
+                      else if (prov === 'ollama') setEmbedModel('nomic-embed-text');
+                    }}
+                  >
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="google">Google</option>
+                  </select>
                   <input className="input-base" style={{ flex: 1 }} value={embedModel} onChange={e => setEmbedModel(e.target.value)} placeholder="Model name (e.g. nomic-embed-text)" />
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Card 2: Local Connection Settings */}
+          {/* Card 2: Credentials & Endpoints */}
           <div style={{
             background: 'var(--bg-panel)',
             border: '1px solid var(--border)',
@@ -248,7 +300,7 @@ export function SettingsPanel() {
               paddingBottom: '12px'
             }}>
               <Key size={18} style={{ color: 'var(--accent-primary)' }} />
-              Local Connection Settings
+              Credentials & Endpoints
             </h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -257,6 +309,53 @@ export function SettingsPanel() {
                 <input className="input-base" style={{ width: '100%' }} value={ollamaBaseUrl} onChange={e => setOllamaBaseUrl(e.target.value)} placeholder="http://localhost:11434" />
                 <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px' }}>
                   Provide the connection endpoint to your local Ollama or LM Studio instance. Default is `http://localhost:11434`.
+                </p>
+              </div>
+
+              <div className="divider" style={{ margin: '16px 0' }} />
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>OpenAI API Key</label>
+                <input 
+                  type="password"
+                  className="input-base" 
+                  style={{ width: '100%' }} 
+                  value={openaiApiKey} 
+                  onChange={e => setOpenaiApiKey(e.target.value)} 
+                  placeholder={openaiApiKey === '*****' ? '••••••••' : 'sk-...'} 
+                />
+                <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px' }}>
+                  Required if routing tasks to OpenAI models. Leave empty if unused.
+                </p>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Anthropic API Key</label>
+                <input 
+                  type="password"
+                  className="input-base" 
+                  style={{ width: '100%' }} 
+                  value={anthropicApiKey} 
+                  onChange={e => setAnthropicApiKey(e.target.value)} 
+                  placeholder={anthropicApiKey === '*****' ? '••••••••' : 'sk-ant-...'} 
+                />
+                <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px' }}>
+                  Required if routing tasks to Anthropic models (e.g. Claude 3.5 Sonnet).
+                </p>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Google Gemini API Key</label>
+                <input 
+                  type="password"
+                  className="input-base" 
+                  style={{ width: '100%' }} 
+                  value={googleApiKey} 
+                  onChange={e => setGoogleApiKey(e.target.value)} 
+                  placeholder={googleApiKey === '*****' ? '••••••••' : 'AIzaSy...'} 
+                />
+                <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px' }}>
+                  Required if routing tasks to Gemini models (e.g. Gemini 1.5 Pro/Flash).
                 </p>
               </div>
             </div>

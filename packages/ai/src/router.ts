@@ -1,5 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOllama } from 'ollama-ai-provider';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel, EmbeddingModel } from 'ai';
 import type { TaskComplexity, ModelProvider } from '@arp/shared';
 
@@ -110,6 +112,9 @@ const DEFAULT_CONFIG: RouterConfig = {
 
 export class ModelRouter {
   private ollama: ReturnType<typeof createOllama> | ReturnType<typeof createOpenAI>;
+  private openai: ReturnType<typeof createOpenAI>;
+  private anthropic: ReturnType<typeof createAnthropic>;
+  private google: ReturnType<typeof createGoogleGenerativeAI>;
   private config: RouterConfig;
 
   constructor(options: ModelRouterOptions = {}, config?: Partial<RouterConfig>) {
@@ -129,6 +134,21 @@ export class ModelRouter {
         baseURL: ollamaUrl,
       });
     }
+
+    const openaiKey = options.openaiApiKey ?? keys.openaiApiKey ?? process.env.OPENAI_API_KEY ?? '';
+    this.openai = createOpenAI({
+      apiKey: openaiKey || 'dummy-key',
+    });
+
+    const anthropicKey = options.anthropicApiKey ?? keys.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? '';
+    this.anthropic = createAnthropic({
+      apiKey: anthropicKey || 'dummy-key',
+    });
+
+    const googleKey = options.googleApiKey ?? keys.googleApiKey ?? process.env.GOOGLE_API_KEY ?? '';
+    this.google = createGoogleGenerativeAI({
+      apiKey: googleKey || 'dummy-key',
+    });
   }
 
   getModel(complexity: TaskComplexity): LanguageModel {
@@ -153,8 +173,14 @@ export class ModelRouter {
     switch (provider) {
       case 'ollama':
         return this.ollama(model);
+      case 'openai':
+        return this.openai(model);
+      case 'anthropic':
+        return this.anthropic(model);
+      case 'google':
+        return this.google(model);
       default:
-        throw new Error(`Unsupported model provider: ${provider}. Only local models via Ollama/LM Studio are supported.`);
+        throw new Error(`Unsupported model provider: ${provider}`);
     }
   }
 
@@ -162,6 +188,10 @@ export class ModelRouter {
     switch (provider) {
       case 'ollama':
         return (this.ollama as any).embedding(model);
+      case 'openai':
+        return this.openai.embedding(model);
+      case 'google':
+        return this.google.textEmbeddingModel(model);
       default:
         // Fallback to ollama
         return this.ollama.embedding('nomic-embed-text');
@@ -169,7 +199,7 @@ export class ModelRouter {
   }
 
   getAvailableProviders(): ModelProvider[] {
-    return ['ollama'];
+    return ['ollama', 'openai', 'anthropic', 'google'];
   }
 }
 
