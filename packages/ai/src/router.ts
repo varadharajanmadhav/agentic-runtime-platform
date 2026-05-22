@@ -1,0 +1,189 @@
+import { createOpenAI } from '@ai-sdk/openai';
+import { createOllama } from 'ollama-ai-provider';
+import type { LanguageModel, EmbeddingModel } from 'ai';
+import type { TaskComplexity, ModelProvider } from '@arp/shared';
+
+export interface ModelRouterOptions {
+  ollamaBaseUrl?: string;
+  openaiApiKey?: string;
+  anthropicApiKey?: string;
+  googleApiKey?: string;
+}
+
+export interface RouteConfig {
+  provider: ModelProvider;
+  model: string;
+}
+
+export interface RouterConfig {
+  low: RouteConfig;
+  medium: RouteConfig;
+  high: RouteConfig;
+  embedding: RouteConfig;
+}
+
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { join } from 'path';
+
+// Find root path where package.json and packages directory coexist
+function getRootPath() {
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    if (existsSync(join(dir, 'package.json')) && existsSync(join(dir, 'packages'))) {
+      return dir;
+    }
+    dir = join(dir, '..');
+  }
+  return process.cwd();
+}
+
+const rootPath = getRootPath();
+const configFilePath = join(rootPath, 'config.json');
+const keysFilePath = join(rootPath, 'keys.json');
+
+export function loadSavedConfig(): Partial<RouterConfig> & { keys?: ModelRouterOptions } {
+  const config: Partial<RouterConfig> & { keys?: ModelRouterOptions } = {};
+  try {
+    if (existsSync(configFilePath)) {
+      const data = readFileSync(configFilePath, 'utf8');
+      const parsed = JSON.parse(data);
+      config.low = parsed.low;
+      config.medium = parsed.medium;
+      config.high = parsed.high;
+      config.embedding = parsed.embedding;
+    }
+  } catch (err) {
+    console.error('[ARP] Error reading config.json', err);
+  }
+
+  try {
+    if (existsSync(keysFilePath)) {
+      const data = readFileSync(keysFilePath, 'utf8');
+      config.keys = JSON.parse(data);
+    } else {
+      // Migrate keys from config.json if they exist
+      if (existsSync(configFilePath)) {
+        const data = readFileSync(configFilePath, 'utf8');
+        const parsed = JSON.parse(data);
+        if (parsed.keys) {
+          config.keys = parsed.keys;
+          writeFileSync(keysFilePath, JSON.stringify(parsed.keys, null, 2), 'utf8');
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[ARP] Error reading/migrating keys.json', err);
+  }
+  return config;
+}
+
+export function saveConfig(configData: Partial<RouterConfig> & { keys?: ModelRouterOptions }) {
+  try {
+    const { keys, ...routing } = configData;
+    writeFileSync(configFilePath, JSON.stringify(routing, null, 2), 'utf8');
+    if (keys) {
+      writeFileSync(keysFilePath, JSON.stringify(keys, null, 2), 'utf8');
+    }
+  } catch (err) {
+    console.error('[ARP] Error writing config.json or keys.json', err);
+  }
+}
+
+const DEFAULT_CONFIG: RouterConfig = {
+  low: {
+    provider: (process.env.DEFAULT_LOW_COMPLEXITY_PROVIDER as ModelProvider) ?? 'ollama',
+    model: process.env.DEFAULT_LOW_COMPLEXITY_MODEL ?? 'qwen2.5-coder:7b',
+  },
+  medium: {
+    provider: (process.env.DEFAULT_MEDIUM_COMPLEXITY_PROVIDER as ModelProvider) ?? 'ollama',
+    model: process.env.DEFAULT_MEDIUM_COMPLEXITY_MODEL ?? 'qwen2.5-coder:32b',
+  },
+  high: {
+    provider: (process.env.DEFAULT_HIGH_COMPLEXITY_PROVIDER as ModelProvider) ?? 'ollama',
+    model: process.env.DEFAULT_HIGH_COMPLEXITY_MODEL ?? 'qwen2.5-coder:32b',
+  },
+  embedding: {
+    provider: (process.env.EMBEDDING_PROVIDER as ModelProvider) ?? 'ollama',
+    model: process.env.EMBEDDING_MODEL ?? 'nomic-embed-text',
+  },
+};
+
+export class ModelRouter {
+  private ollama: ReturnType<typeof createOllama> | ReturnType<typeof createOpenAI>;
+  private config: RouterConfig;
+
+  constructor(options: ModelRouterOptions = {}, config?: Partial<RouterConfig>) {
+    const saved = loadSavedConfig();
+    const { keys = {}, ...savedModels } = saved;
+
+    this.config = { ...DEFAULT_CONFIG, ...savedModels, ...config } as RouterConfig;
+
+    const ollamaUrl = options.ollamaBaseUrl ?? keys.ollamaBaseUrl ?? process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/api';
+    if (ollamaUrl.includes('/v1')) {
+      this.ollama = createOpenAI({
+        baseURL: ollamaUrl,
+        apiKey: 'lm-studio',
+      });
+    } else {
+      this.ollama = createOllama({
+        baseURL: ollamaUrl,
+      });
+    }
+  }
+
+  getModel(complexity: TaskComplexity): LanguageModel {
+    const route = this.config[complexity];
+    return this.resolveLanguageModel(route.provider, route.model);
+  }
+
+  getRoute(complexity: TaskComplexity): RouteConfig {
+    return this.config[complexity];
+  }
+
+  getEmbeddingModel(): EmbeddingModel<string> {
+    const route = this.config.embedding;
+    return this.resolveEmbeddingModel(route.provider, route.model);
+  }
+
+  getModelByProvider(provider: ModelProvider, model: string): LanguageModel {
+    return this.resolveLanguageModel(provider, model);
+  }
+
+  private resolveLanguageModel(provider: ModelProvider, model: string): LanguageModel {
+    switch (provider) {
+      case 'ollama':
+        return this.ollama(model);
+      default:
+        throw new Error(`Unsupported model provider: ${provider}. Only local models via Ollama/LM Studio are supported.`);
+    }
+  }
+
+  private resolveEmbeddingModel(provider: ModelProvider, model: string): EmbeddingModel<string> {
+    switch (provider) {
+      case 'ollama':
+        return (this.ollama as any).embedding(model);
+      default:
+        // Fallback to ollama
+        return this.ollama.embedding('nomic-embed-text');
+    }
+  }
+
+  getAvailableProviders(): ModelProvider[] {
+    return ['ollama'];
+  }
+}
+
+// Singleton instance
+let routerInstance: ModelRouter | null = null;
+
+export function getModelRouter(): ModelRouter {
+  if (!routerInstance) {
+    routerInstance = new ModelRouter();
+  }
+  return routerInstance;
+}
+
+export function initModelRouter(options?: ModelRouterOptions, config?: Partial<RouterConfig>): ModelRouter {
+  routerInstance = new ModelRouter(options, config);
+  return routerInstance;
+}

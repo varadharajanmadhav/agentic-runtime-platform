@@ -1,0 +1,38 @@
+# Agentic Runtime Platform
+
+# Environment
+.env
+.env.local
+.env.*.local
+keys.json
+config.json
+
+# Node
+node_modules/
+dist/
+build/
+.turbo/
+
+# Logs
+*.log
+pino-*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Docker volumes (local)
+pgdata/
+qdrantdata/
+redisdata/
+ollamadata/
+
+# Test coverage
+coverage/
+
+# Local Scratch directory
+scratch/
