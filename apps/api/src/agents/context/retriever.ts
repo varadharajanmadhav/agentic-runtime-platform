@@ -3,7 +3,7 @@ import { join, resolve, relative, isAbsolute } from 'path';
 import { existsSync } from 'fs';
 import { simpleGit } from 'simple-git';
 import { getQdrantClient, COLLECTIONS } from '../../lib/qdrant.js';
-import { getDb, workspaceSymbols, eq, inArray } from '@arp/db';
+import { getDb, workspaceSymbols, eq, inArray, or, like, and } from '@arp/db';
 import { getModelRouter, embedText } from '@arp/ai';
 import type { ContextItem } from '@arp/shared';
 import { estimateTokenCount } from '@arp/shared';
@@ -90,6 +90,67 @@ export async function retrieveContext(options: RetrieveContextOptions): Promise<
     console.error('[Retriever] Semantic retrieval error:', err);
   }
 
+  // 1.5. Keyword/Exact Symbol Name Match (Postgres query)
+  try {
+    const db = getDb();
+    const words = query.match(/\b[a-zA-Z_][a-zA-Z0-9_]{3,}\b/g) || [];
+    const stopWords = new Set(['tell', 'more', 'about', 'method', 'class', 'function', 'variable', 'show', 'find', 'get', 'post']);
+    const filteredWords = words.filter(w => w.length > 3 && !stopWords.has(w.toLowerCase()));
+
+    if (filteredWords.length > 0) {
+      const orConditions = filteredWords.map(word => or(
+        eq(workspaceSymbols.name, word),
+        like(workspaceSymbols.name, `%.${word}`),
+        like(workspaceSymbols.name, `${word}.%`)
+      ));
+
+      const keywordSymbols = await db
+        .select()
+        .from(workspaceSymbols)
+        .where(
+          and(
+            eq(workspaceSymbols.workspaceDir, workspaceDir),
+            or(...orConditions)
+          )
+        );
+
+      for (const sym of keywordSymbols) {
+        const absPath = join(workspaceDir, sym.filePath);
+        if (existsSync(absPath)) {
+          try {
+            const fileContent = await readFile(absPath, 'utf8');
+            const lines = fileContent.split('\n');
+            const startIdx = Math.max(0, sym.startLine - 1);
+            const endIdx = Math.min(lines.length, sym.endLine);
+            const snippet = lines.slice(startIdx, endIdx).join('\n');
+
+            if (!contextItems.some(item => item.id === sym.id)) {
+              contextItems.push({
+                id: sym.id,
+                type: 'symbol',
+                content: `// Symbol: ${sym.name} (${sym.symbolType})\n// File: ${sym.filePath}\n${snippet}`,
+                path: sym.filePath,
+                relevanceScore: 0.95, // High score for exact keyword symbol match
+                tokenCount: estimateTokenCount(snippet),
+                metadata: {
+                  name: sym.name,
+                  symbolType: sym.symbolType,
+                  startLine: sym.startLine,
+                  endLine: sym.endLine,
+                  signature: sym.signature,
+                },
+              });
+            }
+          } catch (readErr) {
+            console.warn(`[Retriever] Could not read file ${sym.filePath} for keyword context:`, readErr);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Retriever] Keyword symbol search error:', err);
+  }
+
   // 2. Git Diff Context
   try {
     const git = simpleGit(workspaceDir);
@@ -116,7 +177,7 @@ export async function retrieveContext(options: RetrieveContextOptions): Promise<
   try {
     // Regex to match file paths or names mentioned in the prompt
     // e.g. "read apps/api/src/app.ts" or just "executor.ts"
-    const fileWordRegex = /(?:[\w\-\.\/]+\.(?:ts|tsx|js|jsx|py|go|json|md))/g;
+    const fileWordRegex = /(?:[\w\-\.\/]+\.(?:ts|tsx|js|jsx|py|go|cs|cshtml|aspx|ascx|html|json|md))/g;
     const matches = Array.from(new Set(query.match(fileWordRegex) || []));
 
     for (const fileMatch of matches) {

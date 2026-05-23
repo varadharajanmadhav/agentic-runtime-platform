@@ -18,7 +18,7 @@ import { getDb, workspaceSymbols, eq, and } from '@arp/db';
 import { getQdrantClient, COLLECTIONS } from './qdrant.js';
 import { indexFile, getIndexingStatus } from '../agents/context/indexer.js';
 
-const INDEXED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.go']);
+const INDEXED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.cs', '.cshtml', '.aspx', '.ascx', '.html']);
 
 const IGNORED_PATTERNS = [
   '**/node_modules/**',

@@ -68,7 +68,7 @@ export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
 
     const { workspaceDir } = parsed.data;
     try {
-      const files = await glob('**/*.{ts,tsx,js,jsx,py,go,json,md,html,css,txt}', {
+      const files = await glob('**/*.{ts,tsx,js,jsx,py,go,json,md,html,css,txt,cs,cshtml,aspx,ascx}', {
         cwd: workspaceDir,
         absolute: false,
         ignore: [

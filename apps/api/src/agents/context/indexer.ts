@@ -185,6 +185,119 @@ export function extractSymbolsRegex(filePath: string, fileContent: string, ext: 
         });
       }
     }
+  } else if (ext === '.cs') {
+    let currentClassName = '';
+    let inBlockComment = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (inBlockComment) {
+        if (trimmed.includes('*/')) {
+          inBlockComment = false;
+        }
+        continue;
+      }
+      if (trimmed.startsWith('/*')) {
+        if (!trimmed.includes('*/')) {
+          inBlockComment = true;
+        }
+        continue;
+      }
+      if (trimmed.startsWith('//') || trimmed.startsWith('*')) {
+        continue;
+      }
+      
+      const classMatch = line.match(/\b(?:class|interface|struct)\s+(\w+)/);
+      if (classMatch) {
+        currentClassName = classMatch[1];
+        symbols.push({
+          name: classMatch[1],
+          type: classMatch[0].includes('interface') ? 'interface' : 'class',
+          signature: line.trim(),
+          docstring: '',
+          startLine: i + 1,
+          endLine: i + 1,
+        });
+        continue;
+      }
+      
+      const methodMatch = line.match(/(?:public|private|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+|readonly\s+)*([\w\<\>\[\]\?]+)\s+(\w+)\s*\(/);
+      if (methodMatch) {
+        const methodName = methodMatch[2];
+        if (!['if', 'for', 'foreach', 'while', 'switch', 'lock', 'using'].includes(methodName)) {
+          symbols.push({
+            name: currentClassName ? `${currentClassName}.${methodName}` : methodName,
+            type: 'method',
+            signature: line.trim(),
+            docstring: '',
+            startLine: i + 1,
+            endLine: i + 1,
+          });
+        }
+      }
+    }
+  } else if (['.cshtml', '.aspx', '.ascx', '.html'].includes(ext)) {
+    let inBlockComment = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (inBlockComment) {
+        if (trimmed.includes('-->') || trimmed.includes('*@') || trimmed.includes('--%>')) {
+          inBlockComment = false;
+        }
+        continue;
+      }
+      if (trimmed.startsWith('<!--') || trimmed.startsWith('@*') || trimmed.startsWith('<%--')) {
+        if (!trimmed.includes('-->') && !trimmed.includes('*@') && !trimmed.includes('--%>')) {
+          inBlockComment = true;
+        }
+        continue;
+      }
+      if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) {
+        continue;
+      }
+      
+      const jsFuncMatch = line.match(/function\s+(\w+)\s*\(/);
+      if (jsFuncMatch) {
+        symbols.push({
+          name: jsFuncMatch[1],
+          type: 'function',
+          signature: line.trim(),
+          docstring: 'Embedded JS Function',
+          startLine: i + 1,
+          endLine: i + 1,
+        });
+      }
+
+      const koMatch = line.match(/(?:self|var|let|const)?\s*(\w+)\s*=\s*ko\.(?:observable|observableArray|computed|pureComputed)\(/);
+      if (koMatch) {
+        symbols.push({
+          name: koMatch[1],
+          type: 'variable',
+          signature: line.trim(),
+          docstring: 'Knockout Observable / Computed Property',
+          startLine: i + 1,
+          endLine: i + 1,
+        });
+      }
+
+      const csMethodMatch = line.match(/(?:public|private|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+|readonly\s+)*([\w\<\>\[\]\?]+)\s+(\w+)\s*\(/);
+      if (csMethodMatch) {
+        const methodName = csMethodMatch[2];
+        if (!['if', 'for', 'foreach', 'while', 'switch', 'lock', 'using'].includes(methodName)) {
+          symbols.push({
+            name: methodName,
+            type: 'method',
+            signature: line.trim(),
+            docstring: 'Embedded C# Server Method',
+            startLine: i + 1,
+            endLine: i + 1,
+          });
+        }
+      }
+    }
   }
 
   return symbols;
@@ -254,7 +367,7 @@ export async function indexFile(workspaceDir: string, absolutePath: string, comp
 
   if (['.ts', '.tsx', '.js', '.jsx'].includes(ext)) {
     symbols = extractSymbolsFromTs(absolutePath, content);
-  } else if (['.py', '.go'].includes(ext)) {
+  } else if (['.py', '.go', '.cs', '.cshtml', '.aspx', '.ascx', '.html'].includes(ext)) {
     symbols = extractSymbolsRegex(absolutePath, content, ext);
   }
 
@@ -386,7 +499,7 @@ export function startIndexing(workspaceDir: string) {
       });
 
       // Find files in workspace using glob
-      const files = await glob('**/*.{ts,tsx,js,jsx,py,go}', {
+      const files = await glob('**/*.{ts,tsx,js,jsx,py,go,cs,cshtml,aspx,ascx,html}', {
         cwd: workspaceDir,
         absolute: true,
         ignore: [
