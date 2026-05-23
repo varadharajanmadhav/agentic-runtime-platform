@@ -6,6 +6,12 @@ import {
   SearchFilesInputSchema,
   GitDiffInputSchema,
   WebFetchInputSchema,
+  GitLogInputSchema,
+  GitShowInputSchema,
+  DotnetBuildInputSchema,
+  DotnetTestInputSchema,
+  NpmRunInputSchema,
+  NpmInstallInputSchema,
 } from '@arp/shared';
 import { readFileTool } from './read-file.js';
 import { writeFileTool } from './write-file.js';
@@ -13,6 +19,12 @@ import { runTerminalTool } from './run-terminal.js';
 import { searchFilesTool } from './search-files.js';
 import { gitDiffTool } from './git-diff.js';
 import { webFetchTool } from './web-fetch.js';
+import { gitLogTool } from './git-log.js';
+import { gitShowTool } from './git-show.js';
+import { dotnetBuildTool } from './dotnet-build.js';
+import { dotnetTestTool } from './dotnet-test.js';
+import { npmRunTool } from './npm-run.js';
+import { npmInstallTool } from './npm-install.js';
 
 export interface ToolDefinition {
   name: string;
@@ -26,6 +38,8 @@ export interface ToolContext {
   sessionId: string;
   workspaceDir?: string;
   sandboxed?: boolean;
+  provider?: string;
+  model?: string;
 }
 
 export interface ToolResult {
@@ -102,6 +116,12 @@ export function getToolRegistry(): ToolRegistry {
     registryInstance.register(searchFilesTool);
     registryInstance.register(gitDiffTool);
     registryInstance.register(webFetchTool);
+    registryInstance.register(gitLogTool);
+    registryInstance.register(gitShowTool);
+    registryInstance.register(dotnetBuildTool);
+    registryInstance.register(dotnetTestTool);
+    registryInstance.register(npmRunTool);
+    registryInstance.register(npmInstallTool);
   }
   return registryInstance;
 }

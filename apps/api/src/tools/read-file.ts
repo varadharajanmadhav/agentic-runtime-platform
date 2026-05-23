@@ -2,6 +2,7 @@ import { readFile, stat } from 'fs/promises';
 import { resolve, relative, isAbsolute } from 'path';
 import type { ToolDefinition } from './registry.js';
 import { ReadFileInputSchema } from '@arp/shared';
+import { capOutput } from './utils.js';
 
 /**
  * Ensures that `targetPath` (resolved against `workspaceDir`) stays within
@@ -48,7 +49,7 @@ export const readFileTool: ToolDefinition = {
         success: true,
         output: {
           path: absolutePath,
-          content: sliced,
+          content: capOutput(sliced, context, 50000),
           totalLines: lines.length,
           startLine: start + 1,
           endLine: Math.min(end, lines.length),
@@ -59,7 +60,7 @@ export const readFileTool: ToolDefinition = {
 
     return {
       success: true,
-      output: { path: absolutePath, content, totalLines: content.split('\n').length },
+      output: { path: absolutePath, content: capOutput(content, context, 100000), totalLines: content.split('\n').length },
       durationMs: 0,
     };
   },

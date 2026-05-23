@@ -47,6 +47,12 @@ const INLINE_TOOL_LABELS: Record<string, { label: string; color: string }> = {
   create_file:     { label: 'Creating file',      color: '#4ade80' },
   delete_file:     { label: 'Deleting file',      color: '#f87171' },
   move_file:       { label: 'Moving file',        color: '#fbbf24' },
+  git_log:         { label: 'Viewing git log',    color: '#06b6d4' },
+  git_show:        { label: 'Viewing git commit', color: '#0d9488' },
+  dotnet_build:    { label: 'Building project',   color: '#8b5cf6' },
+  dotnet_test:     { label: 'Running tests',      color: '#ec4899' },
+  npm_run:         { label: 'Running npm script', color: '#eab308' },
+  npm_install:     { label: 'Installing packages', color: '#10b981' },
   default:         { label: 'Calling tool',       color: '#94a3b8' },
 };
 
@@ -169,6 +175,15 @@ function getToolCategory(toolName: string): string {
       return 'search';
     case 'web_search':
       return 'web';
+    case 'git_log':
+    case 'git_show':
+      return 'git';
+    case 'dotnet_build':
+    case 'dotnet_test':
+      return 'dotnet';
+    case 'npm_run':
+    case 'npm_install':
+      return 'npm';
     default:
       return 'default';
   }
@@ -193,6 +208,16 @@ function getToolIcon(toolName: string) {
       return <Search size={size} style={{ color: '#f472b6' }} />;
     case 'web_search':
       return <Globe size={size} style={{ color: '#38bdf8' }} />;
+    case 'git_log':
+    case 'git_show':
+      return <GitBranch size={size} style={{ color: '#06b6d4' }} />;
+    case 'dotnet_build':
+      return <Cpu size={size} style={{ color: '#8b5cf6' }} />;
+    case 'dotnet_test':
+      return <CheckCircle2 size={size} style={{ color: '#ec4899' }} />;
+    case 'npm_run':
+    case 'npm_install':
+      return <TerminalIcon size={size} style={{ color: '#eab308' }} />;
     default:
       return <Wrench size={size} style={{ color: '#94a3b8' }} />;
   }
@@ -220,6 +245,18 @@ function getToolDescription(toolName: string, input: any): string {
       return 'Searched code';
     case 'web_search':
       return 'Searched the web';
+    case 'git_log':
+      return 'Viewed git log';
+    case 'git_show':
+      return `Viewed commit ${input.commit || 'HEAD'}`;
+    case 'dotnet_build':
+      return `Built project ${input.projectPath ? input.projectPath.split(/[/\\]/).pop() : ''}`;
+    case 'dotnet_test':
+      return `Ran tests ${input.projectPath ? input.projectPath.split(/[/\\]/).pop() : ''}`;
+    case 'npm_run':
+      return `Ran npm script "${input.script}"`;
+    case 'npm_install':
+      return 'Installed npm packages';
     default:
       return toolName
         .split('_')

@@ -64,6 +64,8 @@ export async function executeTask(taskId: string): Promise<void> {
             taskId,
             sessionId,
             workspaceDir: workspaceDir ?? undefined,
+            provider: route.provider,
+            model: route.model,
           });
 
           const durationMs = Date.now() - start;
@@ -170,6 +172,8 @@ export async function executeTask(taskId: string): Promise<void> {
       messages: compiled.messages,
       tools: toolsObj,
       maxSteps: 20,
+      maxTokens: (route as any).maxTokens ?? (route.provider === 'groq' ? 1024 : undefined),
+      maxRetries: 0,
       onError: ({ error }) => {
         streamError = error instanceof Error ? error : new Error(String(error));
       },
@@ -252,7 +256,19 @@ export async function executeTask(taskId: string): Promise<void> {
     emitTaskEvent(taskId, sessionId, 'task_completed', { taskId, totalTokens, cost, promptTokens, completionTokens, output: fullText });
 
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error('[Executor] Task failed with error:', err);
+    let errorMsg = 'Unknown error';
+    if (err instanceof Error) {
+      errorMsg = err.stack || err.message;
+    } else if (err && typeof err === 'object') {
+      try {
+        errorMsg = JSON.stringify(err);
+      } catch {
+        errorMsg = String(err);
+      }
+    } else {
+      errorMsg = String(err);
+    }
     const [currentTask] = await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
     // M-3: Use only DB status for cancellation detection, not fragile string matching
     const isCancelled = currentTask?.status === 'cancelled';

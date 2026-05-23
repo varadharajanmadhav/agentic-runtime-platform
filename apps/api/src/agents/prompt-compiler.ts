@@ -36,6 +36,12 @@ You have access to tools to:
 - Search the codebase
 - Fetch web content
 - View git diffs
+- View git commit logs and history (git_log)
+- View specific git commits (git_show)
+- Build and compile .NET/C# solutions or projects (dotnet_build)
+- Run C# unit tests (dotnet_test)
+- Run JavaScript/TypeScript npm scripts (npm_run)
+- Install JavaScript/TypeScript node modules (npm_install)
 
 Guidelines:
 - Always verify your understanding before making changes
@@ -44,6 +50,32 @@ Guidelines:
 - Run tests after making changes when possible
 - If you are unsure, ask for clarification
 - Never make up file contents — use the read_file tool to check actual content`;
+
+function trimConversationHistory(
+  history: Array<{ role: string; content: string }>,
+  maxTokens: number,
+): Array<{ role: string; content: string }> {
+  const trimmed: Array<{ role: string; content: string }> = [];
+  let tokenCount = 0;
+
+  // Go from newest to oldest to preserve context closest to the current turn
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    const msgTokens = estimateTokenCount(msg.content);
+    if (tokenCount + msgTokens > maxTokens) {
+      if (trimmed.length === 0) {
+        // If the newest message alone exceeds the limit, truncate it
+        const truncatedContent = msg.content.slice(0, maxTokens * 4) + '\n... [history truncated]';
+        trimmed.push({ role: msg.role, content: truncatedContent });
+      }
+      break;
+    }
+    trimmed.push(msg);
+    tokenCount += msgTokens;
+  }
+
+  return trimmed.reverse();
+}
 
 export function compilePrompt(options: CompilePromptOptions): CompiledPrompt {
   const contextWindow = getModelContextWindow(options.provider, options.model);
@@ -88,7 +120,11 @@ export function compilePrompt(options: CompilePromptOptions): CompiledPrompt {
     taskDescription: options.taskDescription,
   });
 
-  const messages = options.conversationHistory.map(m => ({
+  // Limit conversation history to avoid rate limits (especially for groq 12k TPM)
+  const maxHistoryTokens = options.provider === 'groq' ? 500 : 10000;
+  const trimmedHistory = trimConversationHistory(options.conversationHistory, maxHistoryTokens);
+
+  const messages = trimmedHistory.map(m => ({
     role: m.role as 'user' | 'assistant',
     content: m.content,
   }));
@@ -101,7 +137,9 @@ export function compilePrompt(options: CompilePromptOptions): CompiledPrompt {
     });
   }
 
-  const totalTokens = systemTokens + messages.reduce((sum, m) => sum + estimateTokenCount(m.content), 0);
+  // Calculate actual total tokens sent in the prompt (adapted system prompt + tool schemas + messages)
+  const finalSystemTokens = estimateTokenCount(adapted.system);
+  const totalTokens = finalSystemTokens + toolSchemaTokens + messages.reduce((sum, m) => sum + estimateTokenCount(m.content), 0);
 
   return {
     system: adapted.system,

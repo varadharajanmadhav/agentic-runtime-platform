@@ -1,6 +1,7 @@
 import { simpleGit } from 'simple-git';
 import type { ToolDefinition } from './registry.js';
 import { GitDiffInputSchema } from '@arp/shared';
+import { capOutput } from './utils.js';
 
 export const gitDiffTool: ToolDefinition = {
   name: 'git_diff',
@@ -25,7 +26,7 @@ export const gitDiffTool: ToolDefinition = {
     return {
       success: true,
       output: {
-        diff: diff.slice(0, 100000), // Cap at 100KB
+        diff: capOutput(diff, context, 100000),
         status: {
           modified: status.modified,
           created: status.created,

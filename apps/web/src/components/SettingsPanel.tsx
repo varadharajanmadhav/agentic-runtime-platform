@@ -18,6 +18,7 @@ export function SettingsPanel() {
   const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
   const [googleApiKey, setGoogleApiKey] = useState('');
+  const [groqApiKey, setGroqApiKey] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -38,6 +39,7 @@ export function SettingsPanel() {
       setOpenaiApiKey(settings.keys?.openaiApiKey || '');
       setAnthropicApiKey(settings.keys?.anthropicApiKey || '');
       setGoogleApiKey(settings.keys?.googleApiKey || '');
+      setGroqApiKey(settings.keys?.groqApiKey || '');
     }
   }, [settings]);
 
@@ -57,7 +59,8 @@ export function SettingsPanel() {
       ollamaBaseUrl: ollamaBaseUrl,
       openaiApiKey: openaiApiKey,
       anthropicApiKey: anthropicApiKey,
-      googleApiKey: googleApiKey
+      googleApiKey: googleApiKey,
+      groqApiKey: groqApiKey
     };
 
     const success = await saveSettings(models as any, keys as any);
@@ -166,12 +169,14 @@ export function SettingsPanel() {
                       else if (prov === 'anthropic') setLowModel('claude-3-5-haiku-latest');
                       else if (prov === 'google') setLowModel('gemini-1.5-flash');
                       else if (prov === 'ollama') setLowModel('qwen2.5-coder:7b');
+                      else if (prov === 'groq') setLowModel('llama-3.3-70b-versatile');
                     }}
                   >
                     <option value="ollama">Ollama</option>
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="google">Google</option>
+                    <option value="groq">Groq</option>
                   </select>
                   <input className="input-base" style={{ flex: 1 }} value={lowModel} onChange={e => setLowModel(e.target.value)} placeholder="Model name (e.g. qwen2.5-coder:7b)" />
                 </div>
@@ -200,12 +205,14 @@ export function SettingsPanel() {
                       else if (prov === 'anthropic') setMedModel('claude-3-5-sonnet-latest');
                       else if (prov === 'google') setMedModel('gemini-1.5-pro');
                       else if (prov === 'ollama') setMedModel('qwen2.5-coder:32b');
+                      else if (prov === 'groq') setMedModel('llama-3.3-70b-versatile');
                     }}
                   >
                     <option value="ollama">Ollama</option>
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="google">Google</option>
+                    <option value="groq">Groq</option>
                   </select>
                   <input className="input-base" style={{ flex: 1 }} value={medModel} onChange={e => setMedModel(e.target.value)} placeholder="Model name (e.g. qwen2.5-coder:32b)" />
                 </div>
@@ -234,12 +241,14 @@ export function SettingsPanel() {
                       else if (prov === 'anthropic') setHighModel('claude-3-5-sonnet-latest');
                       else if (prov === 'google') setHighModel('gemini-1.5-pro');
                       else if (prov === 'ollama') setHighModel('qwen2.5-coder:32b');
+                      else if (prov === 'groq') setHighModel('llama-3.3-70b-versatile');
                     }}
                   >
                     <option value="ollama">Ollama</option>
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="google">Google</option>
+                    <option value="groq">Groq</option>
                   </select>
                   <input className="input-base" style={{ flex: 1 }} value={highModel} onChange={e => setHighModel(e.target.value)} placeholder="Model name (e.g. qwen2.5-coder:32b)" />
                 </div>
@@ -356,6 +365,21 @@ export function SettingsPanel() {
                 />
                 <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px' }}>
                   Required if routing tasks to Gemini models (e.g. Gemini 1.5 Pro/Flash).
+                </p>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Groq API Key</label>
+                <input 
+                  type="password"
+                  className="input-base" 
+                  style={{ width: '100%' }} 
+                  value={groqApiKey} 
+                  onChange={e => setGroqApiKey(e.target.value)} 
+                  placeholder={groqApiKey === '*****' ? '••••••••' : 'gsk_...'} 
+                />
+                <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '6px' }}>
+                  Required if routing tasks to Groq models (e.g. LLaMA 3.3 70B).
                 </p>
               </div>
             </div>

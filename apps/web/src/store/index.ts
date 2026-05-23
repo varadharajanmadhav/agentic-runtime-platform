@@ -54,6 +54,7 @@ interface SettingsConfig {
     openaiApiKey?: string;
     anthropicApiKey?: string;
     googleApiKey?: string;
+    groqApiKey?: string;
   };
   availableProviders: string[];
 }

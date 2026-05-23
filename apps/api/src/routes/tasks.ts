@@ -79,7 +79,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     const queue = getTaskQueue();
     await queue.add('execute-task', { taskId }, {
       jobId: taskId,
-      attempts: 3,
+      attempts: 1,
       backoff: { type: 'exponential', delay: 2000 },
     });
 

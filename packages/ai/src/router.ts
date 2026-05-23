@@ -10,6 +10,7 @@ export interface ModelRouterOptions {
   openaiApiKey?: string;
   anthropicApiKey?: string;
   googleApiKey?: string;
+  groqApiKey?: string;
 }
 
 export interface RouteConfig {
@@ -115,6 +116,7 @@ export class ModelRouter {
   private openai: ReturnType<typeof createOpenAI>;
   private anthropic: ReturnType<typeof createAnthropic>;
   private google: ReturnType<typeof createGoogleGenerativeAI>;
+  private groq: ReturnType<typeof createOpenAI>;
   private config: RouterConfig;
 
   constructor(options: ModelRouterOptions = {}, config?: Partial<RouterConfig>) {
@@ -149,6 +151,12 @@ export class ModelRouter {
     this.google = createGoogleGenerativeAI({
       apiKey: googleKey || 'dummy-key',
     });
+
+    const groqKey = options.groqApiKey ?? keys.groqApiKey ?? process.env.GROQ_API_KEY ?? '';
+    this.groq = createOpenAI({
+      baseURL: 'https://api.groq.com/openai/v1',
+      apiKey: groqKey || 'dummy-key',
+    });
   }
 
   getModel(complexity: TaskComplexity): LanguageModel {
@@ -179,6 +187,8 @@ export class ModelRouter {
         return this.anthropic(model);
       case 'google':
         return this.google(model);
+      case 'groq':
+        return this.groq(model);
       default:
         throw new Error(`Unsupported model provider: ${provider}`);
     }
@@ -187,19 +197,29 @@ export class ModelRouter {
   private resolveEmbeddingModel(provider: ModelProvider, model: string): EmbeddingModel<string> {
     switch (provider) {
       case 'ollama':
-        return (this.ollama as any).embedding(model);
+        if (typeof (this.ollama as any).embedding === 'function') {
+          return (this.ollama as any).embedding(model);
+        } else if (typeof (this.ollama as any).textEmbeddingModel === 'function') {
+          return (this.ollama as any).textEmbeddingModel(model);
+        }
+        throw new Error('Ollama provider does not support embeddings in its current configuration');
       case 'openai':
         return this.openai.embedding(model);
       case 'google':
         return this.google.textEmbeddingModel(model);
       default:
         // Fallback to ollama
-        return this.ollama.embedding('nomic-embed-text');
+        if (typeof (this.ollama as any).embedding === 'function') {
+          return (this.ollama as any).embedding('nomic-embed-text');
+        } else if (typeof (this.ollama as any).textEmbeddingModel === 'function') {
+          return (this.ollama as any).textEmbeddingModel('nomic-embed-text');
+        }
+        throw new Error('Ollama provider does not support embeddings in its current configuration');
     }
   }
 
   getAvailableProviders(): ModelProvider[] {
-    return ['ollama', 'openai', 'anthropic', 'google'];
+    return ['ollama', 'openai', 'anthropic', 'google', 'groq'];
   }
 }
 
@@ -213,6 +233,7 @@ export function getModelRouter(): ModelRouter {
   return routerInstance;
 }
 
+// Force TSX reload comment
 export function initModelRouter(options?: ModelRouterOptions, config?: Partial<RouterConfig>): ModelRouter {
   routerInstance = new ModelRouter(options, config);
   return routerInstance;

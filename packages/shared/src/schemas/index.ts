@@ -67,6 +67,46 @@ export const WebFetchInputSchema = z.object({
   timeoutMs: z.number().int().positive().default(15000),
 });
 
+export const GitLogInputSchema = z.object({
+  directory: z.string().default('.').describe('Git repository directory'),
+  limit: z.number().int().positive().default(10).describe('Number of commits to return'),
+  file: z.string().optional().describe('Filter commits by file path'),
+});
+
+export const GitShowInputSchema = z.object({
+  directory: z.string().default('.').describe('Git repository directory'),
+  commit: z.string().default('HEAD').describe('Commit hash or reference to show'),
+  file: z.string().optional().describe('Filter diff by file path'),
+});
+
+export const DotnetBuildInputSchema = z.object({
+  projectPath: z.string().optional().describe('Path to the solution (.sln) or project (.csproj) file'),
+  configuration: z.enum(['Debug', 'Release']).default('Debug').describe('Build configuration'),
+  clean: z.boolean().default(false).describe('Run clean target before building'),
+  restore: z.boolean().default(true).describe('Restore NuGet packages before building'),
+  msbuildPath: z.string().optional().describe('Optional path to msbuild.exe for legacy .NET Framework/WCF projects'),
+  extraArgs: z.array(z.string()).optional().describe('Additional command line arguments for the build'),
+});
+
+export const DotnetTestInputSchema = z.object({
+  projectPath: z.string().optional().describe('Path to the test project or solution'),
+  filter: z.string().optional().describe('Test case filter expression, e.g. FullyQualifiedName~MyTests'),
+  configuration: z.enum(['Debug', 'Release']).default('Debug'),
+  extraArgs: z.array(z.string()).optional(),
+});
+
+export const NpmRunInputSchema = z.object({
+  script: z.string().describe('The npm script to run, e.g. "build", "test"'),
+  directory: z.string().optional().describe('Directory to run the npm command in'),
+  extraArgs: z.array(z.string()).optional(),
+});
+
+export const NpmInstallInputSchema = z.object({
+  packages: z.array(z.string()).optional().describe('List of packages to install. If empty, runs npm install'),
+  directory: z.string().optional().describe('Directory to run npm install in'),
+  saveDev: z.boolean().default(false).describe('Save package to devDependencies'),
+});
+
 // ── Auth schemas ───────────────────────────────────────────────
 export const LoginSchema = z.object({
   email: z.string().email(),
@@ -83,7 +123,7 @@ export const JwtPayloadSchema = z.object({
 
 // ── Model config schema ────────────────────────────────────────
 export const ModelConfigSchema = z.object({
-  provider: z.enum(['ollama', 'openai', 'anthropic', 'google']),
+  provider: z.enum(['ollama', 'openai', 'anthropic', 'google', 'groq']),
   model: z.string(),
   maxTokens: z.number().int().positive().optional(),
   temperature: z.number().min(0).max(2).optional(),
@@ -99,4 +139,10 @@ export type RunTerminalInput = z.infer<typeof RunTerminalInputSchema>;
 export type SearchFilesInput = z.infer<typeof SearchFilesInputSchema>;
 export type GitDiffInput = z.infer<typeof GitDiffInputSchema>;
 export type WebFetchInput = z.infer<typeof WebFetchInputSchema>;
+export type GitLogInput = z.infer<typeof GitLogInputSchema>;
+export type GitShowInput = z.infer<typeof GitShowInputSchema>;
+export type DotnetBuildInput = z.infer<typeof DotnetBuildInputSchema>;
+export type DotnetTestInput = z.infer<typeof DotnetTestInputSchema>;
+export type NpmRunInput = z.infer<typeof NpmRunInputSchema>;
+export type NpmInstallInput = z.infer<typeof NpmInstallInputSchema>;
 export type JwtPayload = z.infer<typeof JwtPayloadSchema>;

@@ -1,5 +1,6 @@
 import type { ToolDefinition } from './registry.js';
 import { WebFetchInputSchema } from '@arp/shared';
+import { capOutput } from './utils.js';
 
 const BLOCKED_HOSTS = new Set([
   'localhost', '127.0.0.1', '0.0.0.0', '::1', '::',
@@ -35,7 +36,7 @@ export const webFetchTool: ToolDefinition = {
   name: 'web_fetch',
   description: 'Fetch content from a public URL via HTTP. Private/internal network URLs are blocked.',
   inputSchema: WebFetchInputSchema,
-  async execute(input) {
+  async execute(input, context) {
     const { url, method, headers, body, timeoutMs } = input as {
       url: string;
       method: string;
@@ -67,7 +68,7 @@ export const webFetchTool: ToolDefinition = {
           status: response.status,
           statusText: response.statusText,
           headers: Object.fromEntries(response.headers.entries()),
-          body: responseBody.slice(0, 200000), // 200KB cap
+          body: capOutput(responseBody, context, 200000),
           url,
         },
         error: response.ok ? undefined : `HTTP ${response.status}: ${response.statusText}`,

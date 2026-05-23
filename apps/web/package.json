@@ -7,30 +7,36 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "@arp/shared": "*",
     "@monaco-editor/react": "^4.7.0",
-    "@xterm/xterm": "^5.5.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
-    "reactflow": "^11.11.4",
-    "zustand": "^5.0.3",
-    "date-fns": "^4.1.0",
+    "@xterm/xterm": "^5.5.0",
     "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
     "lucide-react": "^0.475.0",
-    "@arp/shared": "*"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "reactflow": "^11.11.4",
+    "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.0.6",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4.0.6",
     "typescript": "^5.7.3",
     "vite": "^6.0.11",
-    "tailwindcss": "^4.0.6",
-    "@tailwindcss/vite": "^4.0.6"
+    "vitest": "^3.2.4"
   }
 }

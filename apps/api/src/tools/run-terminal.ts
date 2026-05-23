@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { resolve, relative, isAbsolute } from 'path';
 import type { ToolDefinition } from './registry.js';
 import { RunTerminalInputSchema } from '@arp/shared';
+import { capOutput } from './utils.js';
 
 /**
  * CR-4: Block the most destructive/dangerous shell commands.
@@ -98,8 +99,8 @@ export const runTerminalTool: ToolDefinition = {
         resolve({
           success: exitCode === 0 && !timedOut,
           output: {
-            stdout: stdout.slice(0, 50000), // Cap at 50KB
-            stderr: stderr.slice(0, 10000),
+            stdout: capOutput(stdout, context, 50000),
+            stderr: capOutput(stderr, context, 10000),
             exitCode,
             timedOut,
             command,

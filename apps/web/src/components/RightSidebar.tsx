@@ -35,6 +35,12 @@ const TOOL_LABELS: Record<string, { label: string; color: string }> = {
   create_file:     { label: 'Creating file',      color: '#4ade80' },
   delete_file:     { label: 'Deleting file',      color: '#f87171' },
   move_file:       { label: 'Moving file',        color: '#fbbf24' },
+  git_log:         { label: 'Viewing git log',    color: '#06b6d4' },
+  git_show:        { label: 'Viewing commit',     color: '#0d9488' },
+  dotnet_build:    { label: 'Building project',   color: '#8b5cf6' },
+  dotnet_test:     { label: 'Running tests',      color: '#ec4899' },
+  npm_run:         { label: 'Running npm script', color: '#eab308' },
+  npm_install:     { label: 'Installing packages', color: '#10b981' },
   default:         { label: 'Calling tool',       color: '#94a3b8' },
 };
 
