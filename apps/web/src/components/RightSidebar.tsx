@@ -16,6 +16,10 @@ import {
   GitBranch,
   ChevronDown,
   ChevronRight,
+  ListTodo,
+  Loader2,
+  Play,
+  ArrowRight,
 } from 'lucide-react';
 
 // ── Tool-name → human-readable label mapping ─────────────────────────────
@@ -107,7 +111,7 @@ export function RightSidebar() {
     activeRightTab, 
   } = useAppStore();
 
-  const [localTab, setLocalTab] = useState<'diffs' | 'terminal' | 'timeline' | 'metrics'>('diffs');
+  const [localTab, setLocalTab] = useState<'diffs' | 'terminal' | 'tasks' | 'metrics'>('diffs');
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState<number>(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -118,8 +122,8 @@ export function RightSidebar() {
       setLocalTab('diffs');
     } else if (activeRightTab === 'terminal') {
       setLocalTab('terminal');
-    } else if (activeRightTab === 'timeline') {
-      setLocalTab('timeline');
+    } else if (activeRightTab === 'tasks') {
+      setLocalTab('tasks');
     }
   }, [activeRightTab]);
 
@@ -238,150 +242,167 @@ export function RightSidebar() {
   };
   const liveState = getLiveStateLabel();
 
-  // Render Timeline
-  const renderTimeline = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '12px 0', overflowY: 'auto' }}>
-      {/* Live duration */}
-      <div style={{
-        padding: '0 16px 12px 16px',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {isStreaming ? <PulsingDot color={liveState.color} /> : <Circle size={8} style={{ color: liveState.color, fill: liveState.color }} />}
-          <span style={{ fontSize: '11px', fontWeight: 700, color: liveState.color }}>{liveState.label}</span>
+  // Render Tasks Checklist (replaces Timeline)
+  const renderTasksChecklist = () => {
+    const steps = activeTask?.plan?.steps || [];
+    
+    // Calculate progress metrics
+    const completedCount = steps.filter(s => s.status === 'completed').length;
+    const totalCount = steps.length;
+    const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '12px 0', overflowY: 'auto' }}>
+        {/* Live status & duration */}
+        <div style={{
+          padding: '0 16px 12px 16px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {isStreaming ? <PulsingDot color={liveState.color} /> : <Circle size={8} style={{ color: liveState.color, fill: liveState.color }} />}
+            <span style={{ fontSize: '11px', fontWeight: 700, color: liveState.color }}>{liveState.label}</span>
+          </div>
+          <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+            {elapsedMs > 0 ? formatDuration(elapsedMs) : '—'}
+          </span>
         </div>
-        <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-          {elapsedMs > 0 ? formatDuration(elapsedMs) : '—'}
-        </span>
-      </div>
 
-      {/* Execution phases */}
-      <div style={{ padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 0 }}>
-        {PHASE_ORDER.map((phase, idx) => {
-          const meta = PHASE_META[phase];
-          const isDone = phaseIdx > idx;
-          const isActive = phaseIdx === idx && (isStreaming || activeTaskStatus === 'queued');
-          const isFailed = !isStreaming && (activeTaskStatus === 'failed' || activeTaskStatus === 'cancelled') && phaseIdx === idx;
-          const isLast = idx === PHASE_ORDER.length - 1;
-
-          let dotColor = 'var(--border)';
-          if (isDone) dotColor = 'var(--success)';
-          if (isActive) dotColor = meta.color;
-          if (isFailed) dotColor = 'var(--error)';
-
-          return (
-            <div key={phase} style={{ display: 'flex', alignItems: 'stretch', gap: '8px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '12px', flexShrink: 0 }}>
-                <div style={{
-                  width: 10, height: 10, borderRadius: '50%',
-                  background: dotColor,
-                  border: isActive ? `2px solid ${meta.color}` : '2px solid transparent',
-                  flexShrink: 0,
-                  marginTop: '3px',
-                }} />
-                {!isLast && (
-                  <div style={{
-                    flex: 1, width: '1.5px', minHeight: '16px',
-                    background: isDone ? 'var(--success)' : 'var(--border)',
-                    opacity: isDone ? 0.5 : 0.3,
-                  }} />
-                )}
+        {activeTask ? (
+          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>
+            {/* Progress bar container */}
+            <div style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              padding: '12px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                <span>EXECUTION CHECKLIST</span>
+                <span>{completedCount} / {totalCount} Steps ({progressPercent}%)</span>
               </div>
-              <div style={{ paddingBottom: isLast ? 0 : '8px', flex: 1, minWidth: 0 }}>
+              <div style={{ width: '100%', height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
                 <div style={{
-                  display: 'flex', alignItems: 'center', gap: '4px',
-                  color: isDone ? 'var(--text-secondary)' : isActive ? 'var(--text-primary)' : 'var(--text-muted)',
-                  fontWeight: isActive ? 600 : 500,
-                  fontSize: '11px',
-                }}>
-                  <span style={{ color: dotColor }}>{meta.icon}</span>
-                  {meta.label}
-                  {isFailed && <XCircle size={10} style={{ color: 'var(--error)', marginLeft: '2px' }} />}
-                  {isDone && <CheckCircle size={10} style={{ color: 'var(--success)', marginLeft: '2px', opacity: 0.7 }} />}
-                </div>
+                  width: `${progressPercent}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, var(--accent-primary) 0%, #a855f7 100%)',
+                  transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                }} />
               </div>
             </div>
-          );
-        })}
-      </div>
 
-      <div style={{ borderTop: '1px solid var(--border)', margin: '12px 16px 0' }} />
+            {/* Checklist items list */}
+            {steps.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {steps.map((step, idx) => {
+                  const isPending = step.status === 'pending';
+                  const isRunning = step.status === 'running';
+                  const isCompleted = step.status === 'completed';
+                  const isFailed = step.status === 'failed';
+                  const isSkipped = step.status === 'skipped';
 
-      {/* Tool timeline */}
-      {toolCallPairs.length > 0 ? (
-        <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {toolCallPairs.map((pair) => {
-            const tInfo = getToolLabel(pair.toolName);
-            const isExp = expandedEventId === pair.id;
-            const isDone = !!pair.resultEvent;
-            return (
-              <div
-                key={pair.id}
-                style={{
-                  background: 'var(--bg-secondary)',
-                  border: `1px solid ${isExp ? tInfo.color + '55' : 'var(--border)'}`,
-                  borderRadius: '6px',
-                  overflow: 'hidden',
-                }}
-              >
-                <div
-                  onClick={() => setExpandedEventId(isExp ? null : pair.id)}
-                  style={{
-                    padding: '6px 8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                    userSelect: 'none',
-                    gap: '6px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, flex: 1 }}>
-                    {isExp ? <ChevronDown size={10} style={{ color: 'var(--text-muted)' }} /> : <ChevronRight size={10} style={{ color: 'var(--text-muted)' }} />}
-                    <span style={{
-                      width: 6, height: 6, borderRadius: '50%',
-                      background: isDone ? (pair.success ? 'var(--success)' : 'var(--error)') : tInfo.color,
-                      flexShrink: 0,
-                    }} />
-                    <span style={{ fontSize: '10.5px', color: 'var(--text-primary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {pair.toolName}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, fontSize: '9px' }}>
-                    {pair.durationMs > 0 && (
-                      <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                        {formatDuration(pair.durationMs)}
-                      </span>
-                    )}
-                    {isDone && <span style={{ color: pair.success ? 'var(--success)' : 'var(--error)', fontWeight: 700 }}>{pair.success ? '✓' : '✗'}</span>}
-                  </div>
-                </div>
+                  let statusColor = 'var(--text-muted)';
+                  let statusIcon = <Circle size={14} style={{ color: 'var(--border)' }} />;
+                  let bgStyle: React.CSSProperties = {
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border)'
+                  };
 
-                {isExp && (
-                  <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-panel)', padding: '6px' }}>
-                    <pre style={{
-                      margin: 0, fontSize: '9px', fontFamily: 'monospace',
-                      color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                      maxHeight: '100px', overflowY: 'auto'
-                    }}>
-                      {JSON.stringify(pair.input, null, 2)}
-                    </pre>
-                  </div>
+                  if (isCompleted) {
+                    statusColor = 'var(--success)';
+                    statusIcon = <CheckCircle size={14} style={{ color: 'var(--success)', fill: 'rgba(16, 185, 129, 0.1)' }} />;
+                  } else if (isRunning) {
+                    statusColor = 'var(--accent-primary)';
+                    statusIcon = <Loader2 size={14} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />;
+                    bgStyle = {
+                      background: 'rgba(99, 102, 241, 0.04)',
+                      border: '1px solid rgba(99, 102, 241, 0.25)',
+                      boxShadow: '0 0 12px rgba(99, 102, 241, 0.05)'
+                    };
+                  } else if (isFailed) {
+                    statusColor = 'var(--error)';
+                    statusIcon = <XCircle size={14} style={{ color: 'var(--error)', fill: 'rgba(239, 68, 68, 0.1)' }} />;
+                    bgStyle = {
+                      background: 'rgba(239, 68, 68, 0.03)',
+                      border: '1px solid rgba(239, 68, 68, 0.25)'
+                    };
+                  } else if (isSkipped) {
+                    statusColor = 'var(--text-muted)';
+                    statusIcon = <ArrowRight size={14} style={{ color: 'var(--text-muted)' }} />;
+                  }
+
+                  return (
+                    <div
+                      key={step.id || idx}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '10px',
+                        transition: 'all 0.2s ease',
+                        ...bgStyle
+                      }}
+                    >
+                      <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {statusIcon}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                        <span style={{
+                          fontSize: '12px',
+                          fontWeight: isRunning ? 600 : 500,
+                          color: isRunning ? 'var(--text-primary)' : isCompleted || isSkipped ? 'var(--text-muted)' : 'var(--text-secondary)',
+                          textDecoration: isCompleted ? 'line-through' : 'none',
+                          lineHeight: '1.4'
+                        }}>
+                          {step.description}
+                        </span>
+                        {isFailed && step.error && (
+                          <span style={{ fontSize: '10px', color: 'var(--error)', marginTop: '4px', fontFamily: 'monospace' }}>
+                            Error: {step.error}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '48px 24px',
+                color: 'var(--text-muted)',
+                textAlign: 'center',
+                gap: '12px'
+              }}>
+                {activeTask.status === 'planning' || activeTask.status === 'queued' ? (
+                  <>
+                    <Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
+                    <div style={{ fontSize: '12px', fontWeight: 500 }}>Formulating execution checklist...</div>
+                  </>
+                ) : (
+                  <>
+                    <ListTodo size={24} style={{ color: 'var(--border)' }} />
+                    <div style={{ fontSize: '11px' }}>No plan checklist generated for this task.</div>
+                  </>
                 )}
               </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '11px', padding: '24px', textAlign: 'center' }}>
-          No active runs in this session.
-        </div>
-      )}
-    </div>
-  );
+            )}
+          </div>
+        ) : (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '11px', padding: '24px', textAlign: 'center' }}>
+            No active runs in this session.
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Render Metrics
   const renderMetrics = () => (
@@ -471,7 +492,7 @@ export function RightSidebar() {
           {[
             { id: 'diffs', label: 'Diffs', icon: <CheckCircle size={13} /> },
             { id: 'terminal', label: 'Terminal', icon: <Terminal size={13} /> },
-            { id: 'timeline', label: 'Timeline', icon: <GitBranch size={13} /> },
+            { id: 'tasks', label: 'Tasks', icon: <ListTodo size={13} /> },
             { id: 'metrics', label: 'Metrics', icon: <Activity size={13} /> },
           ].map(tab => {
             const isActive = localTab === tab.id;
@@ -508,7 +529,7 @@ export function RightSidebar() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {localTab === 'diffs' && <DiffViewer />}
           {localTab === 'terminal' && <TerminalPanel />}
-          {localTab === 'timeline' && renderTimeline()}
+          {localTab === 'tasks' && renderTasksChecklist()}
           {localTab === 'metrics' && renderMetrics()}
         </div>
       </aside>

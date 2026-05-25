@@ -108,7 +108,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     const BootstrapSchema = z.object({
       email: z.string().email(),
       name: z.string().min(2),
-      password: z.string().min(8),
+      password: z.string().min(5),
     });
 
     const body = BootstrapSchema.parse(request.body);

@@ -80,7 +80,7 @@ interface AppState {
 
   // UI
   activePanel: 'chat' | 'editor' | 'terminal' | 'context' | 'graph' | 'settings' | 'admin';
-  activeRightTab: 'overview' | 'review' | 'terminal' | 'timeline';
+  activeRightTab: 'overview' | 'review' | 'terminal' | 'tasks';
   sidebarOpen: boolean;
   
   // Model Configuration
@@ -173,7 +173,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   isStreaming: false,
   activeWs: null,
   activePanel: 'chat',
-  activeRightTab: 'timeline',
+  activeRightTab: 'tasks',
   sidebarOpen: true,
 
   // Authentication

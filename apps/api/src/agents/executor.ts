@@ -1,4 +1,4 @@
-import { streamText, tool } from 'ai';
+import { streamText, tool, generateText } from 'ai';
 import { z } from 'zod';
 import { getDb, tasks, agentEvents, toolExecutions, messages, eq, desc } from '@arp/db';
 import { getModelRouter } from '@arp/ai';
@@ -6,7 +6,7 @@ import { emitTaskEvent, setTaskStartTime, setTaskStatus, setTaskAgentId } from '
 import { getToolRegistry } from '../tools/registry.js';
 import { compilePrompt } from './prompt-compiler.js';
 import { retrieveContext } from './context/retriever.js';
-import type { ContextItem } from '@arp/shared';
+import type { ContextItem, PlanStep } from '@arp/shared';
 import { estimateCostUsd, estimateTokenCount } from '@arp/shared';
 import { randomUUID } from 'crypto';
 
@@ -20,12 +20,32 @@ export async function executeTask(taskId: string): Promise<void> {
   const { sessionId } = task;
   let fullText = '';
   let contextItems: ContextItem[] = [];
+  let steps: PlanStep[] = [];
 
   // Phase tracking setup
   const agentId = `agent-${randomUUID().slice(0, 8)}`;
   setTaskAgentId(taskId, agentId);
   setTaskStartTime(taskId, Date.now());
   setTaskStatus(taskId, 'queued');
+
+  async function updateStepStatus(stepId: string, status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped') {
+    steps = steps.map(s => s.id === stepId ? { ...s, status } : s);
+    await db.update(tasks).set({
+      plan: { steps, totalEstimatedTokens: 0 },
+      updatedAt: new Date()
+    }).where(eq(tasks.id, taskId));
+
+    if (status === 'running') {
+      await saveEvent(taskId, sessionId, 'step_started', { taskId, stepId });
+      emitTaskEvent(taskId, sessionId, 'step_started', { taskId, stepId });
+    } else if (status === 'completed') {
+      await saveEvent(taskId, sessionId, 'step_completed', { taskId, stepId });
+      emitTaskEvent(taskId, sessionId, 'step_completed', { taskId, stepId });
+    } else if (status === 'failed') {
+      await saveEvent(taskId, sessionId, 'step_failed', { taskId, stepId });
+      emitTaskEvent(taskId, sessionId, 'step_failed', { taskId, stepId });
+    }
+  }
 
   try {
     const { description, complexity, workspaceDir, allowedTools } = task;
@@ -40,6 +60,62 @@ export async function executeTask(taskId: string): Promise<void> {
     const route = router.getRoute(complexity as 'low' | 'medium' | 'high');
     const model = router.getModel(complexity as 'low' | 'medium' | 'high');
     const registry = getToolRegistry();
+
+    // Generate dynamic execution plan steps
+    try {
+      const planPrompt = `You are a planning module for an AI coding assistant.
+Analyze the following user task and break it down into 3 to 5 logical, high-level steps for an execution checklist.
+Provide the output strictly as a JSON array of objects, with no explanation and no markdown block formatting.
+Each object must have the following fields:
+- "id": a string slug (e.g. "read_code", "write_auth_handler", "run_tests")
+- "description": a concise explanation of what the step aims to accomplish (max 80 chars)
+- "status": "pending"
+
+Task: "${description}"
+
+JSON Array:`;
+
+      const planRes = await generateText({
+        model,
+        prompt: planPrompt,
+        maxTokens: 500,
+        temperature: 0.1,
+      });
+
+      const cleanText = planRes.text.trim().replace(/^```json\s*|```$/g, '');
+      const parsed = JSON.parse(cleanText);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        steps = parsed.map((item, idx) => ({
+          id: String(item.id || `step-${idx}`),
+          description: String(item.description || 'Executing step'),
+          status: idx === 0 ? 'running' : 'pending',
+        }));
+      }
+    } catch (err) {
+      console.warn('[Executor] Plan generation failed or timed out. Falling back to default checklist.', err);
+    }
+
+    if (steps.length === 0) {
+      steps = [
+        { id: 'analysis', description: 'Analyze requirements and workspace files', status: 'running' },
+        { id: 'implementation', description: 'Modify source code and implement files', status: 'pending' },
+        { id: 'validation', description: 'Run build and verify with test scripts', status: 'pending' },
+        { id: 'completion', description: 'Finalize changes and present solution', status: 'pending' }
+      ];
+    }
+
+    // Save plan to database
+    await db.update(tasks).set({
+      plan: { steps, totalEstimatedTokens: 0 },
+      updatedAt: new Date(),
+    }).where(eq(tasks.id, taskId));
+
+    // Emit plan_created event
+    await saveEvent(taskId, sessionId, 'plan_created', { taskId, steps });
+    emitTaskEvent(taskId, sessionId, 'plan_created', { taskId, steps });
+    // Emit step_started for first step
+    await saveEvent(taskId, sessionId, 'step_started', { taskId, stepId: steps[0].id });
+    emitTaskEvent(taskId, sessionId, 'step_started', { taskId, stepId: steps[0].id });
 
     // Build Vercel AI SDK tools from registry
     const toolsObj: Record<string, any> = {};
@@ -91,6 +167,21 @@ export async function executeTask(taskId: string): Promise<void> {
             output: result.output,
           });
           await saveEvent(taskId, sessionId, 'tool_result', { toolName: t.name, success: result.success, durationMs });
+
+          // If we run a test or diagnostic, check if we should transition steps
+          if (['run_terminal', 'run_command', 'dotnet_build', 'dotnet_test', 'npm_run', 'get_diagnostics'].includes(t.name)) {
+            const valStep = steps.find(s => s.status === 'pending' && (
+              s.id.includes('val') || s.id.includes('test') || s.id.includes('verify') || s.id.includes('check') || s.id.includes('build') ||
+              s.description.toLowerCase().includes('val') || s.description.toLowerCase().includes('test') || s.description.toLowerCase().includes('verify') || s.description.toLowerCase().includes('check') || s.description.toLowerCase().includes('build')
+            ));
+            if (valStep) {
+              const currentRunning = steps.find(s => s.status === 'running');
+              if (currentRunning && currentRunning.id !== valStep.id) {
+                await updateStepStatus(currentRunning.id, 'completed');
+              }
+              await updateStepStatus(valStep.id, 'running');
+            }
+          }
 
           return result.output;
         },
@@ -157,6 +248,11 @@ export async function executeTask(taskId: string): Promise<void> {
 
     setTaskStatus(taskId, 'executing');
     await db.update(tasks).set({ status: 'executing' }).where(eq(tasks.id, taskId));
+
+    if (steps.length > 1) {
+      await updateStepStatus(steps[0].id, 'completed');
+      await updateStepStatus(steps[1].id, 'running');
+    }
 
     let promptTokens = 0;
     let completionTokens = 0;
@@ -252,12 +348,25 @@ export async function executeTask(taskId: string): Promise<void> {
       updatedAt: new Date(),
     }).where(eq(tasks.id, taskId));
 
+    for (const s of steps) {
+      if (s.status === 'running' || s.status === 'pending') {
+        await updateStepStatus(s.id, 'completed');
+      }
+    }
+
     setTaskStatus(taskId, 'completed');
     await saveEvent(taskId, sessionId, 'task_completed', { taskId, totalTokens, cost, promptTokens, completionTokens, output: fullText });
     emitTaskEvent(taskId, sessionId, 'task_completed', { taskId, totalTokens, cost, promptTokens, completionTokens, output: fullText });
 
   } catch (err) {
     console.error('[Executor] Task failed with error:', err);
+    for (const s of steps) {
+      if (s.status === 'running') {
+        await updateStepStatus(s.id, 'failed');
+      } else if (s.status === 'pending') {
+        await updateStepStatus(s.id, 'skipped');
+      }
+    }
     let errorMsg = 'Unknown error';
     if (err instanceof Error) {
       errorMsg = err.stack || err.message;
