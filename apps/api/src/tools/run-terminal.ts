@@ -3,6 +3,7 @@ import { resolve, relative, isAbsolute } from 'path';
 import type { ToolDefinition } from './registry.js';
 import { RunTerminalInputSchema } from '@arp/shared';
 import { capOutput } from './utils.js';
+import { wrapCommandForSandbox } from '../lib/sandbox.js';
 
 /**
  * CR-4: Block the most destructive/dangerous shell commands.
@@ -76,11 +77,13 @@ export const runTerminalTool: ToolDefinition = {
       let stderr = '';
       let timedOut = false;
 
-      const isWin = process.platform === 'win32';
-      const shell = isWin ? 'cmd.exe' : 'sh';
-      const shellArgs = isWin ? ['/c', command] : ['-c', command];
+      const wrapped = wrapCommandForSandbox({
+        command,
+        cwd,
+        workspaceDir: context.workspaceDir ?? undefined,
+      });
 
-      const child = spawn(shell, shellArgs, {
+      const child = spawn(wrapped.command, wrapped.args, {
         cwd,
         env: { ...process.env, ...env },
         stdio: 'pipe',

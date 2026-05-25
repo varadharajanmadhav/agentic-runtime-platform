@@ -1,8 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { CreateSessionSchema, UpdateSessionSchema } from '@arp/shared';
-import { getDb, sessions, messages, tasks, desc, eq, count } from '@arp/db';
+import { getDb, sessions, messages, tasks, desc, eq, and, count } from '@arp/db';
 import { randomUUID } from 'crypto';
 import { watchWorkspace, unwatchWorkspace } from '../lib/watcher.js';
+import { resolveWorkspaceDir } from '../lib/auth.js';
 
 export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   // List sessions
@@ -11,6 +12,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
     const allSessions = await db
       .select()
       .from(sessions)
+      .where(eq(sessions.userId, request.user.userId))
       .orderBy(desc(sessions.createdAt))
       .limit(50);
     return { success: true, data: allSessions };
@@ -22,7 +24,7 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
     const [session] = await db
       .select()
       .from(sessions)
-      .where(eq(sessions.id, request.params.id))
+      .where(and(eq(sessions.id, request.params.id), eq(sessions.userId, request.user.userId)))
       .limit(1);
     if (!session) return reply.notFound('Session not found');
     return { success: true, data: session };
@@ -31,7 +33,11 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   // Get session messages
   fastify.get<{ Params: { id: string } }>('/:id/messages', async (request, reply) => {
     const db = getDb();
-    const [session] = await db.select().from(sessions).where(eq(sessions.id, request.params.id)).limit(1);
+    const [session] = await db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.id, request.params.id), eq(sessions.userId, request.user.userId)))
+      .limit(1);
     if (!session) return reply.notFound('Session not found');
     const msgs = await db
       .select()
@@ -45,13 +51,20 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/', async (request, reply) => {
     const body = CreateSessionSchema.parse(request.body);
     const db = getDb();
+
+    // Resolve workspace: admins get the requested dir; all other roles are jailed.
+    const workspaceDir = await resolveWorkspaceDir(
+      request.user as any,
+      body.workspaceDir ?? undefined,
+    );
+
     const [session] = await db
       .insert(sessions)
       .values({
         id: randomUUID(),
         title: body.title,
-        workspaceDir: body.workspaceDir,
-        userId: body.userId,
+        workspaceDir,
+        userId: request.user.userId,
         metadata: body.metadata as Record<string, unknown>,
       })
       .returning();
@@ -71,6 +84,15 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(400).send({ success: false, error: 'Invalid request body', details: parsed.error.flatten() });
     }
     const db = getDb();
+
+    // Verify session ownership first
+    const [existing] = await db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.id, request.params.id), eq(sessions.userId, request.user.userId)))
+      .limit(1);
+    if (!existing) return reply.notFound('Session not found');
+
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (parsed.data.title !== undefined) updates.title = parsed.data.title;
     if (parsed.data.workspaceDir !== undefined) updates.workspaceDir = parsed.data.workspaceDir;
@@ -79,19 +101,20 @@ export const sessionRoutes: FastifyPluginAsync = async (fastify) => {
       .set(updates)
       .where(eq(sessions.id, request.params.id))
       .returning();
-    if (!session) return reply.notFound('Session not found');
     return { success: true, data: session };
   });
 
   // Delete session
   fastify.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
     const db = getDb();
-    // Load workspaceDir before deleting so we can stop its watcher
+    // Load workspaceDir before deleting so we can stop its watcher, checking ownership
     const [session] = await db
       .select({ workspaceDir: sessions.workspaceDir })
       .from(sessions)
-      .where(eq(sessions.id, request.params.id))
+      .where(and(eq(sessions.id, request.params.id), eq(sessions.userId, request.user.userId)))
       .limit(1);
+
+    if (!session) return reply.notFound('Session not found');
 
     await db.delete(sessions).where(eq(sessions.id, request.params.id));
 

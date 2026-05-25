@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { getModelRouter, initModelRouter, loadSavedConfig, saveConfig } from '@arp/ai';
 import { z } from 'zod';
+import { requireAdmin } from '../lib/auth.js';
 
 export const modelRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/providers', async () => {
@@ -13,7 +14,7 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
     };
   });
 
-  fastify.get('/config', async () => {
+  fastify.get('/config', { preHandler: requireAdmin }, async () => {
     const router = getModelRouter();
     const saved = loadSavedConfig();
     const { keys = {}, ...models } = saved;
@@ -42,7 +43,7 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
     };
   });
 
-  fastify.post('/config', async (request, reply) => {
+  fastify.post('/config', { preHandler: requireAdmin }, async (request, reply) => {
     // M-2: Validate model config body with Zod schema
     const RouteConfigSchema = z.object({
       provider: z.enum(['ollama', 'openai', 'anthropic', 'google', 'groq']),

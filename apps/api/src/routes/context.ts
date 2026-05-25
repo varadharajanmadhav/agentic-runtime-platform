@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { glob } from 'glob';
 import { readFile, writeFile } from 'fs/promises';
 import { resolve, relative, isAbsolute } from 'path';
+import { resolveWorkspaceDir } from '../lib/auth.js';
 
 export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   // POST /api/context/index
@@ -18,7 +19,8 @@ export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
       return reply.code(400).send({ success: false, error: 'Invalid workspaceDir' });
     }
 
-    const { workspaceDir } = parsed.data;
+    const { workspaceDir: requestedDir } = parsed.data;
+    const workspaceDir = await resolveWorkspaceDir(request.user as any, requestedDir);
 
     // H-8: Block concurrent indexing runs to prevent DB/Qdrant races
     const status = await getIndexingStatus(workspaceDir);
@@ -66,7 +68,8 @@ export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
       return reply.code(400).send({ success: false, error: 'Missing or invalid workspaceDir' });
     }
 
-    const { workspaceDir } = parsed.data;
+    const { workspaceDir: requestedDir } = parsed.data;
+    const workspaceDir = await resolveWorkspaceDir(request.user as any, requestedDir);
     try {
       const files = await glob('**/*.{ts,tsx,js,jsx,py,go,json,md,html,css,txt,cs,cshtml,aspx,ascx}', {
         cwd: workspaceDir,
@@ -99,7 +102,8 @@ export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
       return reply.code(400).send({ success: false, error: 'Missing or invalid parameters' });
     }
 
-    const { workspaceDir, path } = parsed.data;
+    const { workspaceDir: requestedDir, path } = parsed.data;
+    const workspaceDir = await resolveWorkspaceDir(request.user as any, requestedDir);
     try {
       const absolutePath = resolve(workspaceDir, path);
       const rel = relative(workspaceDir, absolutePath);
@@ -127,7 +131,8 @@ export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
       return reply.code(400).send({ success: false, error: 'Missing or invalid parameters' });
     }
 
-    const { workspaceDir, path, content } = parsed.data;
+    const { workspaceDir: requestedDir, path, content } = parsed.data;
+    const workspaceDir = await resolveWorkspaceDir(request.user as any, requestedDir);
     try {
       const absolutePath = resolve(workspaceDir, path);
       const rel = relative(workspaceDir, absolutePath);

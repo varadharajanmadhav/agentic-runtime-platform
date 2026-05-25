@@ -174,7 +174,7 @@ export async function executeTask(taskId: string): Promise<void> {
       onError: ({ error }) => {
         streamError = error instanceof Error ? error : new Error(
           typeof error === 'object' && error !== null
-            ? error.message || error.statusText || JSON.stringify(error)
+            ? (error as any).message || (error as any).statusText || JSON.stringify(error)
             : String(error),
         );
       },

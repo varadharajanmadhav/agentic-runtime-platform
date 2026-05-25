@@ -13,7 +13,8 @@ import {
   Pencil,
   Trash2,
   Check,
-  X
+  X,
+  Users
 } from 'lucide-react';
 
 interface Project {
@@ -36,7 +37,9 @@ export function Sidebar() {
     setActivePanel,
     deleteSession,
     updateSessionTitle,
+    user,
   } = useAppStore();
+  const isAdmin = user?.role === 'admin';
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [userProjects, setUserProjects] = useState<string[]>(() => {
@@ -582,23 +585,46 @@ export function Sidebar() {
       </div>
       
       <div className="divider" style={{ margin: 0 }} />
-      <button 
-        onClick={() => setActivePanel('settings')}
-        className="btn-ghost"
-        style={{ 
-          margin: '8px', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '8px',
-          textAlign: 'left',
-          padding: '8px 12px',
-          width: 'calc(100% - 16px)',
-          background: activePanel === 'settings' ? 'var(--bg-hover)' : 'transparent',
-        }}
-      >
-        <Settings size={16} style={{ opacity: 0.8 }} />
-        <span style={{ fontSize: '13px', fontWeight: 500 }}>Settings</span>
-      </button>
+      {/* Settings — admin only */}
+      {isAdmin && (
+        <button 
+          onClick={() => setActivePanel('settings')}
+          className="btn-ghost"
+          style={{ 
+            margin: '4px 8px 0', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px',
+            textAlign: 'left',
+            padding: '8px 12px',
+            width: 'calc(100% - 16px)',
+            background: activePanel === 'settings' ? 'var(--bg-hover)' : 'transparent',
+          }}
+        >
+          <Settings size={16} style={{ opacity: 0.8 }} />
+          <span style={{ fontSize: '13px', fontWeight: 500 }}>Settings</span>
+        </button>
+      )}
+      {/* Users — admin only */}
+      {isAdmin && (
+        <button 
+          onClick={() => setActivePanel('admin')}
+          className="btn-ghost"
+          style={{ 
+            margin: '0 8px 8px', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px',
+            textAlign: 'left',
+            padding: '8px 12px',
+            width: 'calc(100% - 16px)',
+            background: activePanel === 'admin' ? 'var(--bg-hover)' : 'transparent',
+          }}
+        >
+          <Users size={16} style={{ opacity: 0.8 }} />
+          <span style={{ fontSize: '13px', fontWeight: 500 }}>Users</span>
+        </button>
+      )}
     </aside>
   );
 }

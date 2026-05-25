@@ -79,7 +79,7 @@ interface AppState {
   activeWs: WebSocket | null;
 
   // UI
-  activePanel: 'chat' | 'editor' | 'terminal' | 'context' | 'graph' | 'settings';
+  activePanel: 'chat' | 'editor' | 'terminal' | 'context' | 'graph' | 'settings' | 'admin';
   activeRightTab: 'overview' | 'review' | 'terminal' | 'timeline';
   sidebarOpen: boolean;
   
@@ -109,6 +109,13 @@ interface AppState {
   activeFileLoading: boolean;
   workspaceFiles: string[];
 
+  // Authentication
+  token: string | null;
+  user: { id: string; email: string; name: string; role: string } | null;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (email: string, name: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => void;
+
   // Actions
   fetchSessions: () => Promise<void>;
   createSession: (title: string, workspaceDir?: string) => Promise<Session>;
@@ -137,6 +144,23 @@ interface AppState {
   connectTaskStream: (taskId: string, sessionId: string) => void;
 }
 
+const apiFetch = async (path: string, options: RequestInit = {}) => {
+  const token = useAppStore.getState()?.token;
+  const headers = {
+    ...options.headers,
+  } as Record<string, string>;
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(path, { ...options, headers });
+  if (res.status === 401) {
+    useAppStore.getState()?.logout();
+  }
+  return res;
+};
+
 export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -151,6 +175,74 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   activePanel: 'chat',
   activeRightTab: 'timeline',
   sidebarOpen: true,
+
+  // Authentication
+  token: localStorage.getItem('arp_token'),
+  user: localStorage.getItem('arp_user') ? JSON.parse(localStorage.getItem('arp_user')!) : null,
+
+  login: async (email, password) => {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const json = await res.json();
+      if (json.success && json.token) {
+        localStorage.setItem('arp_token', json.token);
+        localStorage.setItem('arp_user', JSON.stringify(json.user));
+        set({ token: json.token, user: json.user });
+        await get().fetchSessions();
+        return { success: true };
+      }
+      return { success: false, error: json.error || 'Login failed' };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error' };
+    }
+  },
+
+  register: async (email, name, password) => {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, name, password }),
+      });
+      const json = await res.json();
+      if (json.success && json.token) {
+        localStorage.setItem('arp_token', json.token);
+        localStorage.setItem('arp_user', JSON.stringify(json.user));
+        set({ token: json.token, user: json.user });
+        await get().fetchSessions();
+        return { success: true };
+      }
+      return { success: false, error: json.error || 'Registration failed' };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error' };
+    }
+  },
+
+  logout: () => {
+    const ws = get().activeWs;
+    if (ws) {
+      try { ws.close(); } catch {}
+    }
+    localStorage.removeItem('arp_token');
+    localStorage.removeItem('arp_user');
+    set({
+      token: null,
+      user: null,
+      sessions: [],
+      activeSessionId: null,
+      tasks: [],
+      activeTaskId: null,
+      messages: [],
+      events: [],
+      streamingText: '',
+      isStreaming: false,
+      activeWs: null,
+    });
+  },
   
   selectedComplexity: 'medium',
   settings: null,
@@ -191,7 +283,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   fetchSessions: async () => {
     set({ loadingSessions: true });
     try {
-      const res = await fetch(`${API_URL}/api/sessions`);
+      const res = await apiFetch(`${API_URL}/api/sessions`);
       const json = await res.json();
       set({ sessions: json.data ?? [], loadingSessions: false });
     } catch {
@@ -200,7 +292,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   },
 
   createSession: async (title, workspaceDir) => {
-    const res = await fetch(`${API_URL}/api/sessions`, {
+    const res = await apiFetch(`${API_URL}/api/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, workspaceDir }),
@@ -219,7 +311,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
   deleteSession: async (id) => {
     try {
-      const res = await fetch(`${API_URL}/api/sessions/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/sessions/${id}`, {
         method: 'DELETE',
       });
       const json = await res.json();
@@ -249,7 +341,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
   updateSessionTitle: async (id, title) => {
     try {
-      const res = await fetch(`${API_URL}/api/sessions/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/sessions/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
@@ -288,13 +380,13 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     });
 
     // Fetch messages
-    const res = await fetch(`${API_URL}/api/sessions/${id}/messages`);
+    const res = await apiFetch(`${API_URL}/api/sessions/${id}/messages`);
     const json = await res.json();
     set({ messages: json.data ?? [] });
 
     // Fetch tasks & events for session
     try {
-      const tasksRes = await fetch(`${API_URL}/api/tasks?sessionId=${id}`);
+      const tasksRes = await apiFetch(`${API_URL}/api/tasks?sessionId=${id}`);
       const tasksJson = await tasksRes.json();
       const sessionTasks = tasksJson.data ?? [];
       set({ tasks: sessionTasks });
@@ -302,7 +394,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
       const activeTask = sessionTasks[0]; // ordered desc
       if (activeTask) {
         set({ activeTaskId: activeTask.id });
-        const eventsRes = await fetch(`${API_URL}/api/tasks/${activeTask.id}/events`);
+        const eventsRes = await apiFetch(`${API_URL}/api/tasks/${activeTask.id}/events`);
         const eventsJson = await eventsRes.json();
         // L-9: Cap events loaded from history to prevent unbounded state
         set({ events: (eventsJson.data ?? []).slice(-200) });
@@ -356,7 +448,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     }));
 
     if (hasDefaultTitle) {
-      fetch(`${API_URL}/api/sessions/${sessionId}`, {
+      apiFetch(`${API_URL}/api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: cleanTitleFromMessage(content) }),
@@ -368,7 +460,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     // H-2: Create task and verify success before opening EventSource
     let task: Task;
     try {
-      const taskRes = await fetch(`${API_URL}/api/tasks`, {
+      const taskRes = await apiFetch(`${API_URL}/api/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -416,7 +508,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   
   fetchSettings: async () => {
     try {
-      const res = await fetch(`${API_URL}/api/models/config`);
+      const res = await apiFetch(`${API_URL}/api/models/config`);
       const json = await res.json();
       if (json.success) {
         set({ settings: json.data });
@@ -428,7 +520,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
   saveSettings: async (models, keys) => {
     try {
-      const res = await fetch(`${API_URL}/api/models/config`, {
+      const res = await apiFetch(`${API_URL}/api/models/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ models, keys }),
@@ -449,7 +541,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     const taskId = get().activeTaskId;
     if (!taskId) return;
     try {
-      const res = await fetch(`${API_URL}/api/tasks/${taskId}/cancel`, {
+      const res = await apiFetch(`${API_URL}/api/tasks/${taskId}/cancel`, {
         method: 'POST',
       });
       const json = await res.json();
@@ -471,7 +563,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   setActiveTaskId: async (id) => {
     set({ activeTaskId: id, events: [] });
     try {
-      const taskRes = await fetch(`${API_URL}/api/tasks/${id}`);
+      const taskRes = await apiFetch(`${API_URL}/api/tasks/${id}`);
       const taskJson = await taskRes.json();
       if (taskJson.success && taskJson.data) {
         const updatedTask = taskJson.data as Task;
@@ -484,7 +576,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     }
 
     try {
-      const eventsRes = await fetch(`${API_URL}/api/tasks/${id}/events`);
+      const eventsRes = await apiFetch(`${API_URL}/api/tasks/${id}/events`);
       const eventsJson = await eventsRes.json();
       // L-9: Cap events loaded from history to prevent unbounded state growth
       set({ events: (eventsJson.data ?? []).slice(-200) });
@@ -495,7 +587,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
   startIndexing: async (workspaceDir) => {
     try {
-      await fetch(`${API_URL}/api/context/index`, {
+      await apiFetch(`${API_URL}/api/context/index`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspaceDir }),
@@ -509,7 +601,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   // H-1: Added pollCount parameter and max-retry guard to prevent infinite loops
   checkIndexingStatus: async (workspaceDir, pollCount = 0) => {
     try {
-      const res = await fetch(`${API_URL}/api/context/status?workspaceDir=${encodeURIComponent(workspaceDir)}`);
+      const res = await apiFetch(`${API_URL}/api/context/status?workspaceDir=${encodeURIComponent(workspaceDir)}`);
       const json = await res.json();
       if (json.success && json.data) {
         const { status, progressPercent } = json.data;
@@ -550,7 +642,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     if (!session?.workspaceDir) return;
     set({ activeFileLoading: true, activeFile: filePath });
     try {
-      const res = await fetch(`${API_URL}/api/context/file-content?workspaceDir=${encodeURIComponent(session.workspaceDir)}&path=${encodeURIComponent(filePath)}`);
+      const res = await apiFetch(`${API_URL}/api/context/file-content?workspaceDir=${encodeURIComponent(session.workspaceDir)}&path=${encodeURIComponent(filePath)}`);
       const json = await res.json();
       if (json.success && json.data) {
         set({ activeFileContent: json.data.content });
@@ -569,7 +661,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     const session = get().sessions.find(s => s.id === get().activeSessionId);
     if (!session?.workspaceDir) return false;
     try {
-      const res = await fetch(`${API_URL}/api/context/file-save`, {
+      const res = await apiFetch(`${API_URL}/api/context/file-save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -596,7 +688,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/api/context/files?workspaceDir=${encodeURIComponent(session.workspaceDir)}`);
+      const res = await apiFetch(`${API_URL}/api/context/files?workspaceDir=${encodeURIComponent(session.workspaceDir)}`);
       const json = await res.json();
       if (json.success && json.data) {
         set({ workspaceFiles: json.data });
@@ -626,9 +718,10 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
     set({ isStreaming: true, streamingText: '' });
 
+    const token = get().token;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsBase = API_URL.replace(/^https?/, wsProtocol) || `${wsProtocol}//${window.location.host}`;
-    const ws = new WebSocket(`${wsBase}/api/stream/task/${taskId}/ws`);
+    const ws = new WebSocket(`${wsBase}/api/stream/task/${taskId}/ws${token ? `?token=${token}` : ''}`);
     set({ activeWs: ws });
 
     ws.onmessage = async (evt) => {
@@ -714,7 +807,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
         // Sync from DB for full task record
         try {
-          const res = await fetch(`${API_URL}/api/tasks/${taskId}`);
+          const res = await apiFetch(`${API_URL}/api/tasks/${taskId}`);
           const json = await res.json();
           if (json.success && json.data) {
             const updatedTask = json.data as Task;
@@ -724,7 +817,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
         // Sync messages from DB to ensure UI shows the latest assistant message
         try {
-          const res = await fetch(`${API_URL}/api/sessions/${sessionId}/messages`);
+          const res = await apiFetch(`${API_URL}/api/sessions/${sessionId}/messages`);
           const json = await res.json();
           if (json.success && json.data) {
             set({ messages: json.data });
@@ -781,7 +874,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
         // Sync from DB
         try {
-          const res = await fetch(`${API_URL}/api/tasks/${taskId}`);
+          const res = await apiFetch(`${API_URL}/api/tasks/${taskId}`);
           const json = await res.json();
           if (json.success && json.data) {
             const updatedTask = json.data as Task;
@@ -791,7 +884,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
 
         // Sync messages from DB to ensure UI shows the latest error or stopped message
         try {
-          const res = await fetch(`${API_URL}/api/sessions/${sessionId}/messages`);
+          const res = await apiFetch(`${API_URL}/api/sessions/${sessionId}/messages`);
           const json = await res.json();
           if (json.success && json.data) {
             set({ messages: json.data });

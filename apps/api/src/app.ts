@@ -11,6 +11,20 @@ import { healthRoutes } from './routes/health.js';
 import { modelRoutes } from './routes/models.js';
 import { contextRoutes } from './routes/context.js';
 
+import { authRoutes } from './routes/auth.js';
+import { adminRoutes } from './routes/admin.js';
+
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    user: {
+      userId: string;
+      email: string;
+      name: string;
+      role: string;
+    };
+  }
+}
+
 export async function buildApp() {
   // CR-5: Require a proper JWT secret — fail fast rather than silently using a known default
   const jwtSecret = process.env.JWT_SECRET;
@@ -52,34 +66,63 @@ export async function buildApp() {
   await app.register(sensible);
   await app.register(websocket);
 
-  // CR-2: Optional API key auth.
-  // If ARP_API_KEY is set, all /api/* routes require the header:  X-ARP-API-Key: <value>
-  // In development without ARP_API_KEY set, all routes are open (localhost-only assumed).
+  // preValidation / onRequest hook to authenticate routes
   const apiKey = process.env.ARP_API_KEY;
-  if (apiKey) {
-    app.addHook('onRequest', async (request, reply) => {
-      // Always allow health checks and static assets
-      if (request.url.startsWith('/health') || !request.url.startsWith('/api/')) {
+  app.addHook('onRequest', async (request, reply) => {
+    // Exclude health, public routes, and auth (including bootstrap)
+    if (
+      request.url.startsWith('/health') ||
+      request.url.startsWith('/api/auth/') ||
+      !request.url.startsWith('/api/')
+    ) {
+      return;
+    }
+
+    // Support optional API key auth as fallback (e.g. for simple local testing)
+    if (apiKey) {
+      const provided = request.headers['x-arp-api-key'];
+      if (provided === apiKey) {
+        // If an API key is used, mock as admin
+        request.user = {
+          userId: '00000000-0000-0000-0000-000000000000',
+          email: 'admin@arp.local',
+          name: 'API Admin',
+          role: 'admin',
+        };
         return;
       }
-      const provided = request.headers['x-arp-api-key'];
-      if (provided !== apiKey) {
-        return reply.code(401).send({ success: false, error: 'Unauthorized: invalid or missing X-ARP-API-Key header' });
+    }
+
+    try {
+      // Support JWT via query parameter for WebSockets
+      if (request.url.includes('/ws') && (request.query as any)?.token) {
+        const decoded = app.jwt.verify((request.query as any).token);
+        request.user = decoded as any;
+        return;
       }
-    });
+
+      await request.jwtVerify();
+    } catch (err) {
+      return reply.code(401).send({ success: false, error: 'Unauthorized: invalid or missing JWT token' });
+    }
+  });
+
+  if (apiKey) {
     console.log('[ARP] API key authentication enabled');
   } else {
-    console.warn('[ARP] WARNING: ARP_API_KEY is not set — all API routes are publicly accessible. Set ARP_API_KEY in .env to protect them.');
+    console.warn('[ARP] WARNING: ARP_API_KEY is not set. All API routes require a valid JWT token.');
   }
 
   // Routes
   await app.register(healthRoutes, { prefix: '/health' });
+  await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(sessionRoutes, { prefix: '/api/sessions' });
   await app.register(taskRoutes, { prefix: '/api/tasks' });
   await app.register(streamRoutes, { prefix: '/api/stream' });
   await app.register(toolRoutes, { prefix: '/api/tools' });
   await app.register(modelRoutes, { prefix: '/api/models' });
   await app.register(contextRoutes, { prefix: '/api/context' });
+  await app.register(adminRoutes, { prefix: '/api/admin' });
 
   return app;
 }

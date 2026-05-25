@@ -6,10 +6,14 @@ import { RightSidebar } from './components/RightSidebar.js';
 import { SettingsPanel } from './components/SettingsPanel.js';
 import { TerminalPanel } from './components/TerminalPanel.js';
 import { ContextViewerPanel } from './components/ContextViewerPanel.js';
-import { Zap, Coins } from 'lucide-react';
+import { Login } from './components/Login.js';
+import { AdminPanel } from './components/AdminPanel.js';
+import { Zap, Coins, LogOut } from 'lucide-react';
 
 export default function App() {
   const { 
+    token,
+    logout,
     fetchSessions, 
     fetchSettings, 
     sidebarOpen, 
@@ -22,9 +26,15 @@ export default function App() {
   } = useAppStore();
 
   useEffect(() => {
-    fetchSessions();
-    fetchSettings();
-  }, [fetchSessions, fetchSettings]);
+    if (token) {
+      fetchSessions();
+      fetchSettings();
+    }
+  }, [token, fetchSessions, fetchSettings]);
+
+  if (!token) {
+    return <Login />;
+  }
 
   // Calculate session tokens & cost
   const sessionTasks = tasks.filter(t => t.sessionId === activeSessionId);
@@ -34,6 +44,9 @@ export default function App() {
   const renderActivePanel = () => {
     if (activePanel === 'settings') {
       return <SettingsPanel />;
+    }
+    if (activePanel === 'admin') {
+      return <AdminPanel />;
     }
     return <ChatPanel />;
   };
@@ -92,6 +105,26 @@ export default function App() {
                 <Coins size={13} style={{ color: '#eab308' }} />
                 <span>${totalCost.toFixed(4)}</span>
               </div>
+              <button 
+                onClick={logout}
+                style={{
+                  background: 'rgba(243, 139, 168, 0.1)',
+                  border: '1px solid rgba(243, 139, 168, 0.2)',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  color: '#f38ba8',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'background 0.2s',
+                  marginLeft: '8px',
+                }}
+              >
+                <LogOut size={11} />
+                <span>Logout</span>
+              </button>
             </div>
           </div>
         )}
@@ -103,7 +136,7 @@ export default function App() {
       </main>
 
       {/* Right Info Area */}
-      {activePanel !== 'settings' && <RightSidebar />}
+      {activePanel !== 'settings' && activePanel !== 'admin' && <RightSidebar />}
     </div>
   );
 }
