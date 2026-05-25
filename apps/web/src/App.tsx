@@ -17,6 +17,7 @@ export default function App() {
     activePanel, 
     setActivePanel,
     activeSessionId,
+    sessions,
     tasks
   } = useAppStore();
 
@@ -31,21 +32,13 @@ export default function App() {
   const totalCost = sessionTasks.reduce((sum, t) => sum + (t.estimatedCostUsd || 0), 0);
 
   const renderActivePanel = () => {
-    switch (activePanel) {
-      case 'chat':
-      case 'graph':
-        return <ChatPanel />;
-
-      case 'terminal':
-        return <TerminalPanel />;
-      case 'context':
-        return <ContextViewerPanel />;
-      case 'settings':
-        return <SettingsPanel />;
-      default:
-        return <ChatPanel />;
+    if (activePanel === 'settings') {
+      return <SettingsPanel />;
     }
+    return <ChatPanel />;
   };
+
+  const activeSession = sessions.find(s => s.id === activeSessionId);
 
   return (
     <div className={`theme-${theme}`} style={{
@@ -66,7 +59,7 @@ export default function App() {
         background: 'var(--bg-primary)'
       }}>
         {/* Workspace Tab Bar / Header */}
-        {activeSessionId && activePanel !== 'settings' && (
+        {(activeSessionId || sessions.length === 0) && activePanel !== 'settings' && (
           <div style={{
             height: '48px',
             borderBottom: '1px solid var(--border)',
@@ -77,40 +70,16 @@ export default function App() {
             padding: '0 24px',
             flexShrink: 0,
           }}>
-            {/* Tabs */}
-            <div style={{ display: 'flex', gap: '8px', height: '100%', alignItems: 'center' }}>
-              {(['chat', 'terminal', 'context'] as const).map(tab => {
-                const isActive = activePanel === tab;
-                const labels = {
-                  chat: 'Conversation',
-                  terminal: 'Execution Terminal',
-                  context: 'Context Viewer',
-                };
-                return (
-                  <button
-                    key={tab}
-                    onClick={() => setActivePanel(tab)}
-                    style={{
-                      height: '32px',
-                      padding: '0 12px',
-                      fontSize: '13px',
-                      fontWeight: isActive ? 600 : 500,
-                      color: isActive ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                      background: isActive ? 'var(--bg-hover)' : 'transparent',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      transition: 'all 0.15s ease',
-                    }}
-                    className={`workspace-tab ${isActive ? 'active' : ''}`}
-                  >
-                    {labels[tab]}
-                  </button>
-                );
-              })}
+            {/* Session Info */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                {activeSession ? activeSession.title : 'No Active Conversation'}
+              </span>
+              {activeSession?.workspaceDir && (
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                  ({activeSession.workspaceDir.split(/[/\\]/).pop()})
+                </span>
+              )}
             </div>
 
             {/* Token Usage & Cost counter */}

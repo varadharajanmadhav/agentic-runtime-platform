@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { SettingsPanel } from './SettingsPanel.js';
 
-const mockSaveSettings = vi.fn().mockResolvedValue(true);
+const mockSaveSettings = vi.fn().mockResolvedValue({ success: true });
 const mockSetTheme = vi.fn();
 
 vi.mock('../store/index.js', () => {
@@ -28,21 +28,33 @@ vi.mock('../store/index.js', () => {
       saveSettings: mockSaveSettings,
       theme: 'obsidian',
       setTheme: mockSetTheme,
+      maxSteps: 20,
+      setMaxSteps: vi.fn(),
+      requireApproval: false,
+      setRequireApproval: vi.fn(),
+      systemPromptInstructions: 'Test instructions',
+      setSystemPromptInstructions: vi.fn(),
+      indexingExcludes: '**/node_modules/**',
+      setIndexingExcludes: vi.fn(),
     }),
   };
 });
 
 describe('SettingsPanel Component', () => {
-  it('renders initial form values from store settings', () => {
+  it('renders initial form values from store settings after navigating tabs', async () => {
     render(<SettingsPanel />);
     
-    // Check complexity dropdowns and labels
-    expect(screen.getByText('Low Complexity')).toBeInTheDocument();
-    expect(screen.getByText('Medium Complexity')).toBeInTheDocument();
-    expect(screen.getByText('High Complexity')).toBeInTheDocument();
-    
-    // Check input model name values
+    // Default tab is "Agent Control"
+    expect(screen.getByText('Max Tool Execution Steps')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Test instructions')).toBeInTheDocument();
+
+    // Click "Models & Providers" tab to view model fields
+    fireEvent.click(screen.getByText('Models & Providers'));
+    expect(screen.getByText('Low Complexity Tasks')).toBeInTheDocument();
     expect(screen.getByDisplayValue('qwen2.5-coder:7b')).toBeInTheDocument();
+
+    // Click "API Credentials" tab to view key fields
+    fireEvent.click(screen.getByText('API Credentials'));
     expect(screen.getByDisplayValue('sk-123')).toBeInTheDocument();
     expect(screen.getByDisplayValue('http://localhost:11434')).toBeInTheDocument();
   });
@@ -50,7 +62,7 @@ describe('SettingsPanel Component', () => {
   it('triggers saveSettings on form submission', async () => {
     render(<SettingsPanel />);
     
-    const saveButton = screen.getByRole('button', { name: /Save Configurations/i });
+    const saveButton = screen.getByRole('button', { name: /Save Settings/i });
     fireEvent.click(saveButton);
     
     await waitFor(() => {
@@ -58,11 +70,15 @@ describe('SettingsPanel Component', () => {
     });
   });
 
-  it('triggers setTheme on theme dropdown change', () => {
+  it('triggers setTheme on theme swatch click', () => {
     render(<SettingsPanel />);
     
-    const selectTheme = screen.getByDisplayValue('Obsidian Dark (Indigo Accent)');
-    fireEvent.change(selectTheme, { target: { value: 'nord' } });
+    // Switch to "Appearance Theme" tab
+    fireEvent.click(screen.getByText('Appearance Theme'));
+
+    // Find and click "Nord Dark" swatch
+    const nordSwatch = screen.getByText('Nord Dark');
+    fireEvent.click(nordSwatch);
     
     expect(mockSetTheme).toHaveBeenCalledWith('nord');
   });

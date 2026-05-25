@@ -97,9 +97,8 @@ export async function executeTask(taskId: string): Promise<void> {
       }) as any;
     }
 
-    // Compile prompt with context retrieval (skip for conversational greetings/acknowledgments)
-    const skipRetrieval = shouldSkipContext(description);
-    if (workspaceDir && !skipRetrieval) {
+    // Compile prompt with context retrieval
+    if (workspaceDir) {
       try {
         contextItems = await retrieveContext({
           query: description,
@@ -109,8 +108,6 @@ export async function executeTask(taskId: string): Promise<void> {
       } catch (ctxErr) {
         console.error('[Executor] Error retrieving context:', ctxErr);
       }
-    } else if (skipRetrieval) {
-      console.log(`[Executor] Skipping context retrieval for conversational query: "${description}"`);
     }
 
     const compiled = compilePrompt({
@@ -175,7 +172,11 @@ export async function executeTask(taskId: string): Promise<void> {
       maxTokens: (route as any).maxTokens ?? (route.provider === 'groq' ? 1024 : undefined),
       maxRetries: 0,
       onError: ({ error }) => {
-        streamError = error instanceof Error ? error : new Error(String(error));
+        streamError = error instanceof Error ? error : new Error(
+          typeof error === 'object' && error !== null
+            ? error.message || error.statusText || JSON.stringify(error)
+            : String(error),
+        );
       },
       onChunk: ({ chunk }) => {
         if (chunk.type === 'text-delta') {
@@ -333,29 +334,3 @@ async function saveEvent(
   });
 }
 
-function shouldSkipContext(query: string): boolean {
-  const trimmed = query.trim().toLowerCase();
-  
-  // 1. Common short greetings/conversational phrases
-  const conversationalPatterns = [
-    /^(hi|hello|hey|greetings|howdy|yo|hiya|morning|afternoon|evening)(\s+.*)?$/i,
-    /^(thanks|thank you|awesome|great|ok|okay|cool|yes|no|sure|yep|nope|fine|perfect)(\s+.*)?$/i,
-    /^(help|what is this|who are you|what can you do|what is your name)(\s+.*)?$/i,
-  ];
-  
-  const isPatternMatch = conversationalPatterns.some(pat => pat.test(trimmed));
-  if (isPatternMatch) return true;
-
-  // 2. Short queries that don't refer to code keywords or file extensions/paths
-  if (trimmed.length < 15) {
-    const codeKeywords = ['code', 'file', 'git', 'bug', 'fix', 'error', 'run', 'test', 'write', 'create', 'make', 'add', 'find', 'search'];
-    const hasCodeKeyword = codeKeywords.some(kw => trimmed.includes(kw));
-    const hasFileExt = /\.[a-z0-9]{1,4}$/i.test(trimmed);
-    const hasPathSlash = /[\/\\]/.test(trimmed);
-    if (!hasCodeKeyword && !hasFileExt && !hasPathSlash) {
-      return true;
-    }
-  }
-
-  return false;
-}

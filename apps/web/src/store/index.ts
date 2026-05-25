@@ -94,6 +94,15 @@ interface AppState {
   theme: 'obsidian' | 'nord' | 'matrix' | 'midnight' | 'light-glass' | 'light-nord';
   setTheme: (theme: 'obsidian' | 'nord' | 'matrix' | 'midnight' | 'light-glass' | 'light-nord') => void;
 
+  maxSteps: number;
+  setMaxSteps: (steps: number) => void;
+  requireApproval: boolean;
+  setRequireApproval: (appr: boolean) => void;
+  systemPromptInstructions: string;
+  setSystemPromptInstructions: (ins: string) => void;
+  indexingExcludes: string;
+  setIndexingExcludes: (excl: string) => void;
+
   // Workspace Files
   activeFile: string | null;
   activeFileContent: string | null;
@@ -116,7 +125,7 @@ interface AppState {
   
   setSelectedComplexity: (complexity: 'low' | 'medium' | 'high') => void;
   fetchSettings: () => Promise<void>;
-  saveSettings: (models: SettingsConfig['models'], keys: SettingsConfig['keys']) => Promise<boolean>;
+  saveSettings: (models: SettingsConfig['models'], keys: SettingsConfig['keys']) => Promise<{ success: boolean; error?: string }>;
   cancelActiveTask: () => Promise<void>;
   setActiveTaskId: (id: string) => Promise<void>;
   startIndexing: (workspaceDir: string) => Promise<void>;
@@ -153,6 +162,27 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     set({ theme });
   },
 
+  maxSteps: Number(localStorage.getItem('arp_max_steps') || '20'),
+  setMaxSteps: (maxSteps) => {
+    localStorage.setItem('arp_max_steps', String(maxSteps));
+    set({ maxSteps });
+  },
+  requireApproval: localStorage.getItem('arp_require_approval') === 'true',
+  setRequireApproval: (requireApproval) => {
+    localStorage.setItem('arp_require_approval', String(requireApproval));
+    set({ requireApproval });
+  },
+  systemPromptInstructions: localStorage.getItem('arp_system_prompt_instructions') || '',
+  setSystemPromptInstructions: (systemPromptInstructions) => {
+    localStorage.setItem('arp_system_prompt_instructions', systemPromptInstructions);
+    set({ systemPromptInstructions });
+  },
+  indexingExcludes: localStorage.getItem('arp_indexing_excludes') || '**/node_modules/**, **/.git/**, **/dist/**',
+  setIndexingExcludes: (indexingExcludes) => {
+    localStorage.setItem('arp_indexing_excludes', indexingExcludes);
+    set({ indexingExcludes });
+  },
+
   activeFile: null,
   activeFileContent: null,
   activeFileLoading: false,
@@ -176,6 +206,9 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
       body: JSON.stringify({ title, workspaceDir }),
     });
     const json = await res.json();
+    if (!json.success || !json.data) {
+      throw new Error(json.error || 'Failed to create session');
+    }
     const session = json.data as Session;
     set(state => ({ sessions: [session, ...state.sessions] }));
     if (workspaceDir) {
@@ -403,12 +436,13 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
       const json = await res.json();
       if (json.success) {
         await get().fetchSettings();
-        return true;
+        return { success: true };
       }
-    } catch (err) {
+      return { success: false, error: json.error || 'Failed to save settings' };
+    } catch (err: any) {
       console.error('Failed to save settings', err);
+      return { success: false, error: err.message || 'Network error' };
     }
-    return false;
   },
 
   cancelActiveTask: async () => {

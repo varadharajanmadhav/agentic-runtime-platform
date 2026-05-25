@@ -4,6 +4,18 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel, EmbeddingModel } from 'ai';
 import type { TaskComplexity, ModelProvider } from '@arp/shared';
+import { Agent } from 'undici';
+
+const customFetch = (input: string | URL | Request, init?: RequestInit) => {
+  return globalThis.fetch(input, {
+    ...init,
+    dispatcher: new Agent({
+      headersTimeout: 15 * 60 * 1000, // 15 minutes to allow slow local prompt processing
+      bodyTimeout: 15 * 60 * 1000,    // 15 minutes
+      connectTimeout: 60 * 1000,      // 60 seconds
+    }),
+  } as any);
+};
 
 export interface ModelRouterOptions {
   ollamaBaseUrl?: string;
@@ -130,32 +142,38 @@ export class ModelRouter {
       this.ollama = createOpenAI({
         baseURL: ollamaUrl,
         apiKey: 'lm-studio',
+        fetch: customFetch,
       });
     } else {
       this.ollama = createOllama({
         baseURL: ollamaUrl,
+        fetch: customFetch,
       });
     }
 
     const openaiKey = options.openaiApiKey ?? keys.openaiApiKey ?? process.env.OPENAI_API_KEY ?? '';
     this.openai = createOpenAI({
       apiKey: openaiKey || 'dummy-key',
+      fetch: customFetch,
     });
 
     const anthropicKey = options.anthropicApiKey ?? keys.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? '';
     this.anthropic = createAnthropic({
       apiKey: anthropicKey || 'dummy-key',
+      fetch: customFetch,
     });
 
     const googleKey = options.googleApiKey ?? keys.googleApiKey ?? process.env.GOOGLE_API_KEY ?? '';
     this.google = createGoogleGenerativeAI({
       apiKey: googleKey || 'dummy-key',
+      fetch: customFetch,
     });
 
     const groqKey = options.groqApiKey ?? keys.groqApiKey ?? process.env.GROQ_API_KEY ?? '';
     this.groq = createOpenAI({
       baseURL: 'https://api.groq.com/openai/v1',
       apiKey: groqKey || 'dummy-key',
+      fetch: customFetch,
     });
   }
 

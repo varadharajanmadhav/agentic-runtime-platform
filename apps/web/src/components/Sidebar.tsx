@@ -39,7 +39,6 @@ export function Sidebar() {
   } = useAppStore();
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [userProjects, setUserProjects] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('arp_user_projects');
@@ -116,7 +115,48 @@ export function Sidebar() {
       flexShrink: 0,
       overflow: 'hidden',
     }}>
-
+      {/* New Conversation Button */}
+      <div style={{ padding: '12px 12px 8px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <button
+          onClick={async () => {
+            let workspaceDir: string | undefined = undefined;
+            if (activeSession?.workspaceDir) {
+              workspaceDir = activeSession.workspaceDir;
+            } else if (projects.length > 0) {
+              workspaceDir = projects[0].path;
+            }
+            
+            try {
+              const session = await createSession('New Conversation', workspaceDir);
+              await setActiveSession(session.id);
+              setActivePanel('chat');
+            } catch (err) {
+              console.error('[Sidebar] Failed to create new conversation:', err);
+            }
+          }}
+          className="btn-primary"
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            padding: '10px',
+            fontSize: '13px',
+            fontWeight: 600,
+            borderRadius: '8px',
+            cursor: 'pointer',
+            background: 'var(--accent-primary)',
+            color: 'white',
+            border: 'none',
+            transition: 'all 0.2s ease',
+            boxShadow: '0 4px 12px rgba(99, 102, 241, 0.15)',
+          }}
+        >
+          <Plus size={16} />
+          New Conversation
+        </button>
+      </div>
 
       {/* Main projects list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
@@ -327,6 +367,7 @@ export function Sidebar() {
                               try {
                                 const session = await createSession('New Conversation', project.path);
                                 await setActiveSession(session.id);
+                                setActivePanel('chat');
                               } catch (err) {
                                 console.error('Failed to create project session', err);
                               }
@@ -458,29 +499,6 @@ export function Sidebar() {
                                   <X size={14} />
                                 </button>
                               </div>
-                            ) : confirmingDeleteId === session.id ? (
-                              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }} onClick={e => e.stopPropagation()}>
-                                <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 600 }}>Delete?</span>
-                                <div style={{ display: 'flex', gap: '6px' }}>
-                                  <button
-                                    onClick={async () => {
-                                      await deleteSession(session.id);
-                                      setConfirmingDeleteId(null);
-                                    }}
-                                    style={{ background: 'transparent', border: 'none', color: '#10b981', cursor: 'pointer', display: 'flex', padding: '2px' }}
-                                    title="Confirm Delete"
-                                  >
-                                    <Check size={14} />
-                                  </button>
-                                  <button
-                                    onClick={() => setConfirmingDeleteId(null)}
-                                    style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', padding: '2px' }}
-                                    title="Cancel"
-                                  >
-                                    <X size={14} />
-                                  </button>
-                                </div>
-                              </div>
                             ) : (
                               <>
                                 <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
@@ -526,7 +544,9 @@ export function Sidebar() {
                                     <Pencil size={12} />
                                   </button>
                                   <button
-                                    onClick={() => setConfirmingDeleteId(session.id)}
+                                    onClick={async () => {
+                                      await deleteSession(session.id);
+                                    }}
                                     style={{
                                       background: 'transparent',
                                       border: 'none',

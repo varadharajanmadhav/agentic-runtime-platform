@@ -32,6 +32,11 @@ export async function initDb(databaseUrl?: string): Promise<void> {
     connectionTimeoutMillis: 5000,
   });
 
+  // Handle unexpected errors on idle clients to prevent process crashes
+  pool.on('error', (err) => {
+    console.error('[Database Pool] Unexpected error on idle client:', err);
+  });
+
   // Test connection
   const client = await pool.connect();
   await client.query('SELECT 1');
