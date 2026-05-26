@@ -5,7 +5,7 @@ describe('ModelRouter', () => {
   it('should initialize and load router singleton', () => {
     const router = getModelRouter();
     expect(router).toBeDefined();
-    expect(router.getAvailableProviders()).toEqual(['ollama', 'openai', 'anthropic', 'google', 'groq', 'openrouter']);
+    expect(router.getAvailableProviders()).toEqual(['ollama']);
   });
 
   it('should resolve routing configurations for different complexities', () => {
@@ -23,22 +23,21 @@ describe('ModelRouter', () => {
     expect(highRoute).toBeDefined();
   });
 
-  it('should resolve language model instance from provider and model name', () => {
-    const router = getModelRouter();
-    // Resolve dummy OpenAI model instance
-    const modelInstance = router.getModelByProvider('openai', 'gpt-4o');
+  it('should resolve native Ollama language model instance', () => {
+    const router = new ModelRouter({ ollamaBaseUrl: 'http://localhost:11434/api' });
+    const modelInstance = router.getModelByProvider('ollama', 'qwen2.5-coder:7b');
     expect(modelInstance).toBeDefined();
-    expect(modelInstance.modelId).toBe('gpt-4o');
-    expect(modelInstance.provider).toBe('openai.chat');
+    expect(modelInstance.modelId).toBe('qwen2.5-coder:7b');
+    expect(modelInstance.provider).toBe('ollama.chat');
   });
 
-  it('should resolve OpenRouter as an OpenAI-compatible provider', () => {
-    const router = new ModelRouter({ openrouterApiKey: 'test-key' });
-    const modelInstance = router.getModelByProvider('openrouter', 'openai/gpt-4o-mini');
+  it('should resolve local OpenAI-compatible endpoints through Ollama provider routing', () => {
+    const router = new ModelRouter({ ollamaBaseUrl: 'http://localhost:1234/v1' });
+    const modelInstance = router.getModelByProvider('ollama', 'local-model');
 
     expect(modelInstance).toBeDefined();
-    expect(modelInstance.modelId).toBe('openai/gpt-4o-mini');
-    expect(modelInstance.provider).toBe('openrouter.chat');
+    expect(modelInstance.modelId).toBe('local-model');
+    expect(modelInstance.provider).toBe('openai.chat');
   });
 
   it('should throw an error for unsupported model providers', () => {

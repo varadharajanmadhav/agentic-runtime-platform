@@ -13,18 +13,13 @@ vi.mock('../store/index.js', () => {
         models: {
           low: { provider: 'ollama', model: 'qwen2.5-coder:7b' },
           medium: { provider: 'ollama', model: 'qwen2.5-coder:32b' },
-          high: { provider: 'openai', model: 'gpt-4o' },
+          high: { provider: 'ollama', model: 'qwen2.5-coder:32b' },
           embedding: { provider: 'ollama', model: 'nomic-embed-text' },
         },
         keys: {
           ollamaBaseUrl: 'http://localhost:11434',
-          openaiApiKey: 'sk-123',
-          anthropicApiKey: '',
-          googleApiKey: '',
-          groqApiKey: '',
-          openrouterApiKey: '',
         },
-        availableProviders: ['ollama', 'openai', 'anthropic', 'google', 'groq', 'openrouter'],
+        availableProviders: ['ollama'],
       },
       saveSettings: mockSaveSettings,
       theme: 'obsidian',
@@ -49,14 +44,13 @@ describe('SettingsPanel Component', () => {
     expect(screen.getByText('Max Tool Execution Steps')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Test instructions')).toBeInTheDocument();
 
-    // Click "Models & Providers" tab to view model fields
-    fireEvent.click(screen.getByText('Models & Providers'));
+    // Click "Local Models" tab to view model fields
+    fireEvent.click(screen.getByText('Local Models'));
     expect(screen.getByText('Low Complexity Tasks')).toBeInTheDocument();
     expect(screen.getByDisplayValue('qwen2.5-coder:7b')).toBeInTheDocument();
 
-    // Click "API Credentials" tab to view key fields
-    fireEvent.click(screen.getByText('API Credentials'));
-    expect(screen.getByDisplayValue('sk-123')).toBeInTheDocument();
+    // Click "Local Endpoint" tab to view endpoint field
+    fireEvent.click(screen.getByText('Local Endpoint'));
     expect(screen.getByDisplayValue('http://localhost:11434')).toBeInTheDocument();
   });
 

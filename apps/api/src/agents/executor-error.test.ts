@@ -6,7 +6,7 @@ describe('formatTaskError', () => {
     const error = Object.assign(new Error('Provider returned error'), {
       name: 'AI_APICallError',
       statusCode: 400,
-      url: 'https://openrouter.ai/api/v1/chat/completions',
+      url: 'http://localhost:1234/v1/chat/completions',
       responseBody: JSON.stringify({
         error: {
           message: 'No endpoints found that support tool use',
@@ -20,7 +20,7 @@ describe('formatTaskError', () => {
 
     expect(formatted).toContain('AI_APICallError: Provider returned error');
     expect(formatted).toContain('HTTP status: 400');
-    expect(formatted).toContain('URL: https://openrouter.ai/api/v1/chat/completions');
+    expect(formatted).toContain('URL: http://localhost:1234/v1/chat/completions');
     expect(formatted).toContain('Provider response: No endpoints found that support tool use (400)');
     expect(formatted).not.toContain('STACK SHOULD NOT BE SHOWN');
   });

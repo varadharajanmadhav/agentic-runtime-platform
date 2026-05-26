@@ -44,18 +44,13 @@ function isDuplicateAgentEvent(eventsList: AgentEvent[], newEvent: AgentEvent): 
 
 interface SettingsConfig {
   models: {
-    low: { provider: string; model: string };
-    medium: { provider: string; model: string };
-    high: { provider: string; model: string };
-    embedding: { provider: string; model: string };
+    low: { provider: string; model: string; ollamaBaseUrl?: string };
+    medium: { provider: string; model: string; ollamaBaseUrl?: string };
+    high: { provider: string; model: string; ollamaBaseUrl?: string };
+    embedding: { provider: string; model: string; ollamaBaseUrl?: string };
   };
   keys: {
     ollamaBaseUrl: string;
-    openaiApiKey?: string;
-    anthropicApiKey?: string;
-    googleApiKey?: string;
-    groqApiKey?: string;
-    openrouterApiKey?: string;
   };
   availableProviders: string[];
 }

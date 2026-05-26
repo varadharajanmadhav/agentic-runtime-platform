@@ -9,14 +9,13 @@ describe('Prompt Compiler', () => {
       { role: 'assistant', content: 'Message 2' },
     ];
     
-    // Low complexity options for a standard provider
     const options = {
       taskDescription: 'Current Task',
       contextItems: [] as ContextItem[],
       conversationHistory: history,
       availableToolNames: ['read_file'],
-      provider: 'openai' as const,
-      model: 'gpt-4o',
+      provider: 'ollama' as const,
+      model: 'qwen2.5-coder:7b',
     };
 
     const compiled = compilePrompt(options);
@@ -25,25 +24,23 @@ describe('Prompt Compiler', () => {
     expect(compiled.messages[compiled.messages.length - 1].content).toContain('Current Task');
   });
 
-  it('should apply strict history trimming limits for groq provider', () => {
+  it('should trim oversized newest history messages', () => {
     const history = [
       { role: 'user', content: 'short message' },
-      { role: 'assistant', content: 'a'.repeat(4000) }, // newest message exceeds limit
+      { role: 'assistant', content: 'a'.repeat(50000) }, // newest message exceeds limit
     ];
     
     const options = {
-      taskDescription: 'Groq Task',
+      taskDescription: 'Local Task',
       contextItems: [] as ContextItem[],
       conversationHistory: history,
       availableToolNames: ['read_file'],
-      provider: 'groq' as const,
-      model: 'llama-3.3-70b-versatile',
+      provider: 'ollama' as const,
+      model: 'qwen2.5-coder:7b',
     };
 
     const compiled = compilePrompt(options);
     
-    // For Groq, the newest assistant message (1000 tokens) exceeds the 500 token limit.
-    // It should be truncated because it is the newest message and alone exceeds the limit.
     expect(compiled.messages.some(m => m.content.includes('[history truncated]'))).toBe(true);
   });
 });

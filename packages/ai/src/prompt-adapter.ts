@@ -52,13 +52,6 @@ function buildOllamaPrompt(options: PromptAdapterOptions, model: string): Adapte
 
 // Model context window sizes for token budgeting
 export function getModelContextWindow(provider: ModelProvider, model: string): number {
-  if (provider === 'groq') {
-    // Groq Free/Dev tier has very low TPM limits (e.g., 12000 for Llama 3.3 70b)
-    // Capping at 4000 ensures the total request is safely under the limit
-    return 4000;
-  }
-
-  // Ollama
   if (model.includes('7b') || model.includes('8b')) return 8192;
   if (model.includes('32b')) return 32768;
   if (model.includes('70b')) return 32768;

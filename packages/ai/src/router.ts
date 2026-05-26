@@ -1,7 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOllama } from 'ollama-ai-provider';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel, EmbeddingModel } from 'ai';
 import type { TaskComplexity, ModelProvider } from '@arp/shared';
 import { Agent } from 'undici';
@@ -19,16 +17,12 @@ const customFetch = (input: string | URL | Request, init?: RequestInit) => {
 
 export interface ModelRouterOptions {
   ollamaBaseUrl?: string;
-  openaiApiKey?: string;
-  anthropicApiKey?: string;
-  googleApiKey?: string;
-  groqApiKey?: string;
-  openrouterApiKey?: string;
 }
 
 export interface RouteConfig {
   provider: ModelProvider;
   model: string;
+  ollamaBaseUrl?: string;
 }
 
 export interface RouterConfig {
@@ -63,10 +57,7 @@ export function loadSavedConfig(): Partial<RouterConfig> & { keys?: ModelRouterO
     if (existsSync(configFilePath)) {
       const data = readFileSync(configFilePath, 'utf8');
       const parsed = JSON.parse(data);
-      config.low = parsed.low;
-      config.medium = parsed.medium;
-      config.high = parsed.high;
-      config.embedding = parsed.embedding;
+      Object.assign(config, normalizeConfig(parsed));
     }
   } catch (err) {
     console.error('[ARP] Error reading config.json', err);
@@ -75,15 +66,16 @@ export function loadSavedConfig(): Partial<RouterConfig> & { keys?: ModelRouterO
   try {
     if (existsSync(keysFilePath)) {
       const data = readFileSync(keysFilePath, 'utf8');
-      config.keys = JSON.parse(data);
+      const parsed = JSON.parse(data);
+      config.keys = { ollamaBaseUrl: parsed.ollamaBaseUrl || '' };
     } else {
       // Migrate keys from config.json if they exist
       if (existsSync(configFilePath)) {
         const data = readFileSync(configFilePath, 'utf8');
         const parsed = JSON.parse(data);
         if (parsed.keys) {
-          config.keys = parsed.keys;
-          writeFileSync(keysFilePath, JSON.stringify(parsed.keys, null, 2), 'utf8');
+          config.keys = { ollamaBaseUrl: parsed.keys.ollamaBaseUrl || '' };
+          writeFileSync(keysFilePath, JSON.stringify(config.keys, null, 2), 'utf8');
         }
       }
     }
@@ -96,9 +88,9 @@ export function loadSavedConfig(): Partial<RouterConfig> & { keys?: ModelRouterO
 export function saveConfig(configData: Partial<RouterConfig> & { keys?: ModelRouterOptions }) {
   try {
     const { keys, ...routing } = configData;
-    writeFileSync(configFilePath, JSON.stringify(routing, null, 2), 'utf8');
+    writeFileSync(configFilePath, JSON.stringify(normalizeConfig(routing), null, 2), 'utf8');
     if (keys) {
-      writeFileSync(keysFilePath, JSON.stringify(keys, null, 2), 'utf8');
+      writeFileSync(keysFilePath, JSON.stringify({ ollamaBaseUrl: keys.ollamaBaseUrl || '' }, null, 2), 'utf8');
     }
   } catch (err) {
     console.error('[ARP] Error writing config.json or keys.json', err);
@@ -107,93 +99,85 @@ export function saveConfig(configData: Partial<RouterConfig> & { keys?: ModelRou
 
 const DEFAULT_CONFIG: RouterConfig = {
   low: {
-    provider: (process.env.DEFAULT_LOW_COMPLEXITY_PROVIDER as ModelProvider) ?? 'ollama',
+    provider: 'ollama',
     model: process.env.DEFAULT_LOW_COMPLEXITY_MODEL ?? 'qwen2.5-coder:7b',
   },
   medium: {
-    provider: (process.env.DEFAULT_MEDIUM_COMPLEXITY_PROVIDER as ModelProvider) ?? 'ollama',
+    provider: 'ollama',
     model: process.env.DEFAULT_MEDIUM_COMPLEXITY_MODEL ?? 'qwen2.5-coder:32b',
   },
   high: {
-    provider: (process.env.DEFAULT_HIGH_COMPLEXITY_PROVIDER as ModelProvider) ?? 'ollama',
+    provider: 'ollama',
     model: process.env.DEFAULT_HIGH_COMPLEXITY_MODEL ?? 'qwen2.5-coder:32b',
   },
   embedding: {
-    provider: (process.env.EMBEDDING_PROVIDER as ModelProvider) ?? 'ollama',
+    provider: 'ollama',
     model: process.env.EMBEDDING_MODEL ?? 'nomic-embed-text',
   },
 };
 
+function normalizeRoute(route: unknown, fallback: RouteConfig): RouteConfig {
+  if (!route || typeof route !== 'object') return fallback;
+  const record = route as Partial<RouteConfig>;
+  if (record.provider !== 'ollama' || typeof record.model !== 'string' || record.model.trim() === '') {
+    return fallback;
+  }
+  return { 
+    provider: 'ollama', 
+    model: record.model,
+    ollamaBaseUrl: typeof record.ollamaBaseUrl === 'string' ? record.ollamaBaseUrl : undefined
+  };
+}
+
+function normalizeConfig(config: Partial<RouterConfig>): Partial<RouterConfig> {
+  const normalized: Partial<RouterConfig> = {};
+  if (config.low !== undefined) normalized.low = normalizeRoute(config.low, DEFAULT_CONFIG.low);
+  if (config.medium !== undefined) normalized.medium = normalizeRoute(config.medium, DEFAULT_CONFIG.medium);
+  if (config.high !== undefined) normalized.high = normalizeRoute(config.high, DEFAULT_CONFIG.high);
+  if (config.embedding !== undefined) normalized.embedding = normalizeRoute(config.embedding, DEFAULT_CONFIG.embedding);
+  return normalized;
+}
+
 export class ModelRouter {
-  private ollama: ReturnType<typeof createOllama> | ReturnType<typeof createOpenAI>;
-  private openai: ReturnType<typeof createOpenAI>;
-  private anthropic: ReturnType<typeof createAnthropic>;
-  private google: ReturnType<typeof createGoogleGenerativeAI>;
-  private groq: ReturnType<typeof createOpenAI>;
-  private openrouter: ReturnType<typeof createOpenAI>;
+  private clients = new Map<string, ReturnType<typeof createOllama> | ReturnType<typeof createOpenAI>>();
   private config: RouterConfig;
+  private defaultOllamaUrl: string;
 
   constructor(options: ModelRouterOptions = {}, config?: Partial<RouterConfig>) {
     const saved = loadSavedConfig();
     const { keys = {}, ...savedModels } = saved;
 
-    this.config = { ...DEFAULT_CONFIG, ...savedModels, ...config } as RouterConfig;
+    this.config = { ...DEFAULT_CONFIG, ...normalizeConfig(savedModels), ...normalizeConfig(config ?? {}) } as RouterConfig;
+    this.defaultOllamaUrl = options.ollamaBaseUrl ?? keys.ollamaBaseUrl ?? process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/api';
+  }
 
-    const ollamaUrl = options.ollamaBaseUrl ?? keys.ollamaBaseUrl ?? process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/api';
-    if (ollamaUrl.includes('/v1')) {
-      this.ollama = createOpenAI({
-        baseURL: ollamaUrl,
+  private getClient(ollamaBaseUrl?: string): ReturnType<typeof createOllama> | ReturnType<typeof createOpenAI> {
+    const url = ollamaBaseUrl || this.defaultOllamaUrl;
+    if (this.clients.has(url)) {
+      return this.clients.get(url)!;
+    }
+
+    let client: ReturnType<typeof createOllama> | ReturnType<typeof createOpenAI>;
+    if (url.includes('/v1')) {
+      client = createOpenAI({
+        baseURL: url,
         apiKey: 'lm-studio',
         fetch: customFetch,
       });
     } else {
-      this.ollama = createOllama({
-        baseURL: ollamaUrl,
+      client = createOllama({
+        baseURL: url,
         fetch: customFetch,
       });
     }
 
-    const openaiKey = options.openaiApiKey ?? keys.openaiApiKey ?? process.env.OPENAI_API_KEY ?? '';
-    this.openai = createOpenAI({
-      apiKey: openaiKey || 'dummy-key',
-      fetch: customFetch,
-    });
-
-    const anthropicKey = options.anthropicApiKey ?? keys.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? '';
-    this.anthropic = createAnthropic({
-      apiKey: anthropicKey || 'dummy-key',
-      fetch: customFetch,
-    });
-
-    const googleKey = options.googleApiKey ?? keys.googleApiKey ?? process.env.GOOGLE_API_KEY ?? '';
-    this.google = createGoogleGenerativeAI({
-      apiKey: googleKey || 'dummy-key',
-      fetch: customFetch,
-    });
-
-    const groqKey = options.groqApiKey ?? keys.groqApiKey ?? process.env.GROQ_API_KEY ?? '';
-    this.groq = createOpenAI({
-      baseURL: 'https://api.groq.com/openai/v1',
-      apiKey: groqKey || 'dummy-key',
-      fetch: customFetch,
-    });
-
-    const openrouterKey = options.openrouterApiKey ?? keys.openrouterApiKey ?? process.env.OPENROUTER_API_KEY ?? '';
-    this.openrouter = createOpenAI({
-      name: 'openrouter',
-      baseURL: 'https://openrouter.ai/api/v1',
-      apiKey: openrouterKey || 'dummy-key',
-      headers: {
-        'HTTP-Referer': process.env.OPENROUTER_SITE_URL ?? 'http://localhost:5173',
-        'X-Title': process.env.OPENROUTER_APP_NAME ?? 'Agentic Runtime Platform',
-      },
-      fetch: customFetch,
-    });
+    this.clients.set(url, client);
+    return client;
   }
 
   getModel(complexity: TaskComplexity): LanguageModel {
     const route = this.config[complexity];
-    return this.resolveLanguageModel(route.provider, route.model);
+    return this.resolveLanguageModel(route.provider, route.model, route.ollamaBaseUrl);
   }
 
   getRoute(complexity: TaskComplexity): RouteConfig {
@@ -202,58 +186,42 @@ export class ModelRouter {
 
   getEmbeddingModel(): EmbeddingModel<string> {
     const route = this.config.embedding;
-    return this.resolveEmbeddingModel(route.provider, route.model);
+    return this.resolveEmbeddingModel(route.provider, route.model, route.ollamaBaseUrl);
   }
 
-  getModelByProvider(provider: ModelProvider, model: string): LanguageModel {
-    return this.resolveLanguageModel(provider, model);
+  getModelByProvider(provider: ModelProvider, model: string, ollamaBaseUrl?: string): LanguageModel {
+    return this.resolveLanguageModel(provider, model, ollamaBaseUrl);
   }
 
-  private resolveLanguageModel(provider: ModelProvider, model: string): LanguageModel {
+  private resolveLanguageModel(provider: ModelProvider, model: string, ollamaBaseUrl?: string): LanguageModel {
     switch (provider) {
-      case 'ollama':
-        return this.ollama(model);
-      case 'openai':
-        return this.openai(model);
-      case 'anthropic':
-        return this.anthropic(model);
-      case 'google':
-        return this.google(model);
-      case 'groq':
-        return this.groq(model);
-      case 'openrouter':
-        return this.openrouter(model);
+      case 'ollama': {
+        const client = this.getClient(ollamaBaseUrl);
+        return client(model);
+      }
       default:
         throw new Error(`Unsupported model provider: ${provider}`);
     }
   }
 
-  private resolveEmbeddingModel(provider: ModelProvider, model: string): EmbeddingModel<string> {
+  private resolveEmbeddingModel(provider: ModelProvider, model: string, ollamaBaseUrl?: string): EmbeddingModel<string> {
     switch (provider) {
-      case 'ollama':
-        if (typeof (this.ollama as any).embedding === 'function') {
-          return (this.ollama as any).embedding(model);
-        } else if (typeof (this.ollama as any).textEmbeddingModel === 'function') {
-          return (this.ollama as any).textEmbeddingModel(model);
+      case 'ollama': {
+        const client = this.getClient(ollamaBaseUrl);
+        if (typeof (client as any).embedding === 'function') {
+          return (client as any).embedding(model);
+        } else if (typeof (client as any).textEmbeddingModel === 'function') {
+          return (client as any).textEmbeddingModel(model);
         }
         throw new Error('Ollama provider does not support embeddings in its current configuration');
-      case 'openai':
-        return this.openai.embedding(model);
-      case 'google':
-        return this.google.textEmbeddingModel(model);
+      }
       default:
-        // Fallback to ollama
-        if (typeof (this.ollama as any).embedding === 'function') {
-          return (this.ollama as any).embedding('nomic-embed-text');
-        } else if (typeof (this.ollama as any).textEmbeddingModel === 'function') {
-          return (this.ollama as any).textEmbeddingModel('nomic-embed-text');
-        }
-        throw new Error('Ollama provider does not support embeddings in its current configuration');
+        throw new Error(`Unsupported embedding provider: ${provider}`);
     }
   }
 
   getAvailableProviders(): ModelProvider[] {
-    return ['ollama', 'openai', 'anthropic', 'google', 'groq', 'openrouter'];
+    return ['ollama'];
   }
 }
 

@@ -44,9 +44,9 @@ describe('MarkdownRenderer Component', () => {
 const a = 123;
 \`\`\``} />);
     
-    expect(screen.getByText('const a = 123;')).toBeInTheDocument();
-    expect(screen.getByText('javascript')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    expect(document.querySelector('code')?.textContent).toBe('const a = 123;\n');
+    expect(document.querySelector('code')?.className).toContain('language-javascript');
+    expect(document.querySelector('.copy-code-btn')).toBeInTheDocument();
   });
 
   it('renders valid links and ignores unsafe protocols', () => {

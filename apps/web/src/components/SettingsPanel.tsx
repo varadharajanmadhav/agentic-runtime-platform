@@ -34,22 +34,56 @@ export function SettingsPanel() {
   const [activeTab, setActiveTab] = useState<TabId>('control');
 
   // Existing Model state
-  const [lowProvider, setLowProvider] = useState('ollama');
   const [lowModel, setLowModel] = useState('qwen2.5-coder:7b');
-  const [medProvider, setMedProvider] = useState('ollama');
   const [medModel, setMedModel] = useState('qwen2.5-coder:32b');
-  const [highProvider, setHighProvider] = useState('ollama');
   const [highModel, setHighModel] = useState('qwen2.5-coder:32b');
-  const [embedProvider, setEmbedProvider] = useState('ollama');
   const [embedModel, setEmbedModel] = useState('nomic-embed-text');
+
+  // Model URL overrides state
+  const [lowBaseUrl, setLowBaseUrl] = useState('');
+  const [medBaseUrl, setMedBaseUrl] = useState('');
+  const [highBaseUrl, setHighBaseUrl] = useState('');
+  const [embedBaseUrl, setEmbedBaseUrl] = useState('');
+
+  // Available models by endpoint URL
+  const [availableModels, setAvailableModels] = useState<Record<string, string[]>>({});
 
   // Existing Key state
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState('');
-  const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [anthropicApiKey, setAnthropicApiKey] = useState('');
-  const [googleApiKey, setGoogleApiKey] = useState('');
-  const [groqApiKey, setGroqApiKey] = useState('');
-  const [openrouterApiKey, setOpenrouterApiKey] = useState('');
+
+  // Load available models for a given base URL override
+  const fetchAvailableModels = async (baseUrlOverride: string) => {
+    const resolvedUrl = baseUrlOverride || ollamaBaseUrl || '';
+    if (!resolvedUrl.trim()) return;
+
+    try {
+      const token = localStorage.getItem('arp_token');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const API_URL = import.meta.env.VITE_API_URL ?? '';
+      const queryUrl = `${API_URL}/api/models/local-models?baseUrl=${encodeURIComponent(resolvedUrl)}`;
+      const res = await fetch(queryUrl, { headers });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setAvailableModels(prev => ({
+          ...prev,
+          [resolvedUrl]: json.data
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch available models for endpoint:', resolvedUrl, err);
+    }
+  };
+
+  const getModelOptions = (modelBaseUrl: string) => {
+    const resolvedUrl = modelBaseUrl || ollamaBaseUrl;
+    return availableModels[resolvedUrl] || [];
+  };
 
   // Extended state local hooks (saved alongside other settings)
   const [localMaxSteps, setLocalMaxSteps] = useState(20);
@@ -64,23 +98,39 @@ export function SettingsPanel() {
   // Sync settings when loaded
   useEffect(() => {
     if (settings) {
-      setLowProvider(settings.models?.low?.provider || 'ollama');
       setLowModel(settings.models?.low?.model || 'qwen2.5-coder:7b');
-      setMedProvider(settings.models?.medium?.provider || 'ollama');
       setMedModel(settings.models?.medium?.model || 'qwen2.5-coder:32b');
-      setHighProvider(settings.models?.high?.provider || 'ollama');
       setHighModel(settings.models?.high?.model || 'qwen2.5-coder:32b');
-      setEmbedProvider(settings.models?.embedding?.provider || 'ollama');
       setEmbedModel(settings.models?.embedding?.model || 'nomic-embed-text');
 
+      setLowBaseUrl(settings.models?.low?.ollamaBaseUrl || '');
+      setMedBaseUrl(settings.models?.medium?.ollamaBaseUrl || '');
+      setHighBaseUrl(settings.models?.high?.ollamaBaseUrl || '');
+      setEmbedBaseUrl(settings.models?.embedding?.ollamaBaseUrl || '');
+
       setOllamaBaseUrl(settings.keys?.ollamaBaseUrl || '');
-      setOpenaiApiKey(settings.keys?.openaiApiKey || '');
-      setAnthropicApiKey(settings.keys?.anthropicApiKey || '');
-      setGoogleApiKey(settings.keys?.googleApiKey || '');
-      setGroqApiKey(settings.keys?.groqApiKey || '');
-      setOpenrouterApiKey(settings.keys?.openrouterApiKey || '');
     }
   }, [settings]);
+
+  // Automatically fetch models for the currently configured base URLs
+  useEffect(() => {
+    const lowUrl = lowBaseUrl || ollamaBaseUrl;
+    const medUrl = medBaseUrl || ollamaBaseUrl;
+    const highUrl = highBaseUrl || ollamaBaseUrl;
+    const embedUrl = embedBaseUrl || ollamaBaseUrl;
+
+    const urls = Array.from(new Set([lowUrl, medUrl, highUrl, embedUrl])).filter(Boolean);
+
+    const timer = setTimeout(() => {
+      urls.forEach(url => {
+        if (url) {
+          fetchAvailableModels(url);
+        }
+      });
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [lowBaseUrl, medBaseUrl, highBaseUrl, embedBaseUrl, ollamaBaseUrl]);
 
   // Sync extended fields from Zustand on load
   useEffect(() => {
@@ -104,19 +154,14 @@ export function SettingsPanel() {
 
     // Save model routing & keys to API backend
     const models = {
-      low: { provider: lowProvider, model: lowModel },
-      medium: { provider: medProvider, model: medModel },
-      high: { provider: highProvider, model: highModel },
-      embedding: { provider: embedProvider, model: embedModel }
+      low: { provider: 'ollama', model: lowModel, ollamaBaseUrl: lowBaseUrl || undefined },
+      medium: { provider: 'ollama', model: medModel, ollamaBaseUrl: medBaseUrl || undefined },
+      high: { provider: 'ollama', model: highModel, ollamaBaseUrl: highBaseUrl || undefined },
+      embedding: { provider: 'ollama', model: embedModel, ollamaBaseUrl: embedBaseUrl || undefined }
     };
 
     const keys = {
       ollamaBaseUrl: ollamaBaseUrl,
-      openaiApiKey: openaiApiKey,
-      anthropicApiKey: anthropicApiKey,
-      googleApiKey: googleApiKey,
-      groqApiKey: groqApiKey,
-      openrouterApiKey: openrouterApiKey
     };
 
     const result = await saveSettings(models as any, keys as any);
@@ -143,8 +188,8 @@ export function SettingsPanel() {
   const sidebarTabs: Array<{ id: TabId; label: string; icon: React.ReactNode }> = [
     { id: 'control', label: 'Agent Control', icon: <Sliders size={15} /> },
     { id: 'safety', label: 'Execution Safety', icon: <ShieldAlert size={15} /> },
-    { id: 'models', label: 'Models & Providers', icon: <Cpu size={15} /> },
-    { id: 'keys', label: 'API Credentials', icon: <Key size={15} /> },
+    { id: 'models', label: 'Local Models', icon: <Cpu size={15} /> },
+    { id: 'keys', label: 'Local Endpoint', icon: <Key size={15} /> },
     { id: 'exclusions', label: 'Index Exclusions', icon: <FolderMinus size={15} /> },
     { id: 'appearance', label: 'Appearance Theme', icon: <Palette size={15} /> },
   ];
@@ -416,116 +461,142 @@ export function SettingsPanel() {
             {activeTab === 'models' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {/* Low */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Low Complexity Tasks</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Low Complexity Tasks</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <select 
                       className="input-base" 
                       style={{ minWidth: '140px', cursor: 'pointer' }}
-                      value={lowProvider} 
-                      onChange={e => {
-                        const prov = e.target.value;
-                        setLowProvider(prov);
-                        if (prov === 'openai') setLowModel('gpt-4o-mini');
-                        else if (prov === 'anthropic') setLowModel('claude-3-5-haiku-latest');
-                        else if (prov === 'google') setLowModel('gemini-1.5-flash');
-                        else if (prov === 'ollama') setLowModel('qwen2.5-coder:7b');
-                        else if (prov === 'groq') setLowModel('llama-3.3-70b-versatile');
-                        else if (prov === 'openrouter') setLowModel('openai/gpt-4o-mini');
-                      }}
+                      value="ollama" 
+                      onChange={() => {}}
                     >
-                      <option value="ollama">Ollama</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="google">Google</option>
-                      <option value="groq">Groq</option>
-                      <option value="openrouter">OpenRouter</option>
+                      <option value="ollama">Ollama / Local</option>
                     </select>
-                    <input className="input-base" style={{ flex: 1 }} value={lowModel} onChange={e => setLowModel(e.target.value)} placeholder="Model name" />
+                    <input 
+                      className="input-base" 
+                      style={{ flex: 1 }} 
+                      value={lowModel} 
+                      onChange={e => setLowModel(e.target.value)} 
+                      placeholder="Model name" 
+                      list="low-models-list"
+                    />
+                    <datalist id="low-models-list">
+                      {getModelOptions(lowBaseUrl).map(m => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                    <input 
+                      className="input-base" 
+                      style={{ width: '240px' }} 
+                      value={lowBaseUrl} 
+                      onChange={e => setLowBaseUrl(e.target.value)} 
+                      placeholder="Base URL override (optional)" 
+                    />
                   </div>
                 </div>
 
                 {/* Medium */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Medium Complexity Tasks</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Medium Complexity Tasks</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <select 
                       className="input-base" 
                       style={{ minWidth: '140px', cursor: 'pointer' }}
-                      value={medProvider} 
-                      onChange={e => {
-                        const prov = e.target.value;
-                        setMedProvider(prov);
-                        if (prov === 'openai') setMedModel('gpt-4o');
-                        else if (prov === 'anthropic') setMedModel('claude-3-5-sonnet-latest');
-                        else if (prov === 'google') setMedModel('gemini-1.5-pro');
-                        else if (prov === 'ollama') setMedModel('qwen2.5-coder:32b');
-                        else if (prov === 'groq') setMedModel('llama-3.3-70b-versatile');
-                        else if (prov === 'openrouter') setMedModel('openai/gpt-4o');
-                      }}
+                      value="ollama" 
+                      onChange={() => {}}
                     >
-                      <option value="ollama">Ollama</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="google">Google</option>
-                      <option value="groq">Groq</option>
-                      <option value="openrouter">OpenRouter</option>
+                      <option value="ollama">Ollama / Local</option>
                     </select>
-                    <input className="input-base" style={{ flex: 1 }} value={medModel} onChange={e => setMedModel(e.target.value)} placeholder="Model name" />
+                    <input 
+                      className="input-base" 
+                      style={{ flex: 1 }} 
+                      value={medModel} 
+                      onChange={e => setMedModel(e.target.value)} 
+                      placeholder="Model name" 
+                      list="med-models-list"
+                    />
+                    <datalist id="med-models-list">
+                      {getModelOptions(medBaseUrl).map(m => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                    <input 
+                      className="input-base" 
+                      style={{ width: '240px' }} 
+                      value={medBaseUrl} 
+                      onChange={e => setMedBaseUrl(e.target.value)} 
+                      placeholder="Base URL override (optional)" 
+                    />
                   </div>
                 </div>
 
                 {/* High */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>High Complexity Tasks</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>High Complexity Tasks</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <select 
                       className="input-base" 
                       style={{ minWidth: '140px', cursor: 'pointer' }}
-                      value={highProvider} 
-                      onChange={e => {
-                        const prov = e.target.value;
-                        setHighProvider(prov);
-                        if (prov === 'openai') setHighModel('gpt-4o');
-                        else if (prov === 'anthropic') setHighModel('claude-3-5-sonnet-latest');
-                        else if (prov === 'google') setHighModel('gemini-1.5-pro');
-                        else if (prov === 'ollama') setHighModel('qwen2.5-coder:32b');
-                        else if (prov === 'groq') setHighModel('llama-3.3-70b-versatile');
-                        else if (prov === 'openrouter') setHighModel('anthropic/claude-3.5-sonnet');
-                      }}
+                      value="ollama" 
+                      onChange={() => {}}
                     >
-                      <option value="ollama">Ollama</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="google">Google</option>
-                      <option value="groq">Groq</option>
-                      <option value="openrouter">OpenRouter</option>
+                      <option value="ollama">Ollama / Local</option>
                     </select>
-                    <input className="input-base" style={{ flex: 1 }} value={highModel} onChange={e => setHighModel(e.target.value)} placeholder="Model name" />
+                    <input 
+                      className="input-base" 
+                      style={{ flex: 1 }} 
+                      value={highModel} 
+                      onChange={e => setHighModel(e.target.value)} 
+                      placeholder="Model name" 
+                      list="high-models-list"
+                    />
+                    <datalist id="high-models-list">
+                      {getModelOptions(highBaseUrl).map(m => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                    <input 
+                      className="input-base" 
+                      style={{ width: '240px' }} 
+                      value={highBaseUrl} 
+                      onChange={e => setHighBaseUrl(e.target.value)} 
+                      placeholder="Base URL override (optional)" 
+                    />
                   </div>
                 </div>
 
                 {/* Embedding */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Embedding Model (RAG)</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Embedding Model (RAG)</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <select 
                       className="input-base" 
                       style={{ minWidth: '140px', cursor: 'pointer' }}
-                      value={embedProvider} 
-                      onChange={e => {
-                        const prov = e.target.value;
-                        setEmbedProvider(prov);
-                        if (prov === 'openai') setEmbedModel('text-embedding-3-small');
-                        else if (prov === 'google') setEmbedModel('text-embedding-004');
-                        else if (prov === 'ollama') setEmbedModel('nomic-embed-text');
-                      }}
+                      value="ollama" 
+                      onChange={() => {}}
                     >
-                      <option value="ollama">Ollama</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="google">Google</option>
+                      <option value="ollama">Ollama / Local</option>
                     </select>
-                    <input className="input-base" style={{ flex: 1 }} value={embedModel} onChange={e => setEmbedModel(e.target.value)} placeholder="Embedding model name" />
+                    <input 
+                      className="input-base" 
+                      style={{ flex: 1 }} 
+                      value={embedModel} 
+                      onChange={e => setEmbedModel(e.target.value)} 
+                      placeholder="Embedding model name" 
+                      list="embed-models-list"
+                    />
+                    <datalist id="embed-models-list">
+                      {getModelOptions(embedBaseUrl).map(m => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                    <input 
+                      className="input-base" 
+                      style={{ width: '240px' }} 
+                      value={embedBaseUrl} 
+                      onChange={e => setEmbedBaseUrl(e.target.value)} 
+                      placeholder="Base URL override (optional)" 
+                    />
                   </div>
                 </div>
               </div>
@@ -535,71 +606,10 @@ export function SettingsPanel() {
             {activeTab === 'keys' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Ollama Base URL</label>
-                  <input className="input-base" style={{ width: '100%' }} value={ollamaBaseUrl} onChange={e => setOllamaBaseUrl(e.target.value)} placeholder="http://localhost:11434" />
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Local Model Base URL</label>
+                  <input className="input-base" style={{ width: '100%' }} value={ollamaBaseUrl} onChange={e => setOllamaBaseUrl(e.target.value)} placeholder="http://localhost:11434/api or http://localhost:1234/v1" />
                 </div>
 
-                <div className="divider" style={{ margin: '8px 0' }} />
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>OpenAI API Key</label>
-                  <input 
-                    type="password"
-                    className="input-base" 
-                    style={{ width: '100%' }} 
-                    value={openaiApiKey} 
-                    onChange={e => setOpenaiApiKey(e.target.value)} 
-                    placeholder={openaiApiKey === '*****' ? '••••••••' : 'sk-...'} 
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Anthropic API Key</label>
-                  <input 
-                    type="password"
-                    className="input-base" 
-                    style={{ width: '100%' }} 
-                    value={anthropicApiKey} 
-                    onChange={e => setAnthropicApiKey(e.target.value)} 
-                    placeholder={anthropicApiKey === '*****' ? '••••••••' : 'sk-ant-...'} 
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Google API Key</label>
-                  <input 
-                    type="password"
-                    className="input-base" 
-                    style={{ width: '100%' }} 
-                    value={googleApiKey} 
-                    onChange={e => setGoogleApiKey(e.target.value)} 
-                    placeholder={googleApiKey === '*****' ? '••••••••' : 'AIzaSy...'} 
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>Groq API Key</label>
-                  <input 
-                    type="password"
-                    className="input-base" 
-                    style={{ width: '100%' }} 
-                    value={groqApiKey} 
-                    onChange={e => setGroqApiKey(e.target.value)} 
-                    placeholder={groqApiKey === '*****' ? '••••••••' : 'gsk_...'} 
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>OpenRouter API Key</label>
-                  <input 
-                    type="password"
-                    className="input-base" 
-                    style={{ width: '100%' }} 
-                    value={openrouterApiKey} 
-                    onChange={e => setOpenrouterApiKey(e.target.value)} 
-                    placeholder={openrouterApiKey === '*****' ? '••••••••' : 'sk-or-v1-...'} 
-                  />
-                </div>
               </div>
             )}
 

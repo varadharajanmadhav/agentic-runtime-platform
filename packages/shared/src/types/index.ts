@@ -153,7 +153,7 @@ export interface Message {
 }
 
 // Model provider types
-export type ModelProvider = 'ollama' | 'openai' | 'anthropic' | 'google' | 'groq' | 'openrouter';
+export type ModelProvider = 'ollama';
 
 export interface ModelConfig {
   provider: ModelProvider;
@@ -161,6 +161,7 @@ export interface ModelConfig {
   maxTokens?: number;
   temperature?: number;
   topP?: number;
+  ollamaBaseUrl?: string;
 }
 
 export interface ModelRouterConfig {

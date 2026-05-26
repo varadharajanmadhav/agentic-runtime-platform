@@ -130,11 +130,12 @@ export const JwtPayloadSchema = z.object({
 
 // ── Model config schema ────────────────────────────────────────
 export const ModelConfigSchema = z.object({
-  provider: z.enum(['ollama', 'openai', 'anthropic', 'google', 'groq', 'openrouter']),
+  provider: z.literal('ollama'),
   model: z.string(),
   maxTokens: z.number().int().positive().optional(),
   temperature: z.number().min(0).max(2).optional(),
   topP: z.number().min(0).max(1).optional(),
+  ollamaBaseUrl: z.string().optional(),
 });
 
 export type CreateSessionInput = z.infer<typeof CreateSessionSchema>;

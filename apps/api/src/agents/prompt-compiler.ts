@@ -120,9 +120,7 @@ export function compilePrompt(options: CompilePromptOptions): CompiledPrompt {
     taskDescription: options.taskDescription,
   });
 
-  // Limit conversation history to avoid rate limits (especially for groq 12k TPM)
-  const maxHistoryTokens = options.provider === 'groq' ? 500 : 10000;
-  const trimmedHistory = trimConversationHistory(options.conversationHistory, maxHistoryTokens);
+  const trimmedHistory = trimConversationHistory(options.conversationHistory, 10000);
 
   const messages = trimmedHistory.map(m => ({
     role: m.role as 'user' | 'assistant',

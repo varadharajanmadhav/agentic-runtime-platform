@@ -3,6 +3,26 @@ import { getModelRouter, initModelRouter, loadSavedConfig, saveConfig } from '@a
 import { z } from 'zod';
 import { requireAdmin } from '../lib/auth.js';
 
+const defaultModels = {
+  low: { provider: 'ollama', model: 'qwen2.5-coder:7b' },
+  medium: { provider: 'ollama', model: 'qwen2.5-coder:32b' },
+  high: { provider: 'ollama', model: 'qwen2.5-coder:32b' },
+  embedding: { provider: 'ollama', model: 'nomic-embed-text' },
+} as const;
+
+function localRouteOrDefault(route: unknown, fallback: { provider: 'ollama'; model: string; ollamaBaseUrl?: string }) {
+  if (!route || typeof route !== 'object') return fallback;
+  const record = route as { provider?: unknown; model?: unknown; ollamaBaseUrl?: unknown };
+  if (record.provider !== 'ollama' || typeof record.model !== 'string' || record.model.trim() === '') {
+    return fallback;
+  }
+  return { 
+    provider: 'ollama' as const, 
+    model: record.model,
+    ollamaBaseUrl: typeof record.ollamaBaseUrl === 'string' ? record.ollamaBaseUrl : undefined
+  };
+}
+
 export const modelRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/providers', async () => {
     const router = getModelRouter();
@@ -14,29 +34,50 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
     };
   });
 
+  fastify.get('/local-models', async (request, reply) => {
+    const { baseUrl } = request.query as { baseUrl?: string };
+    const saved = loadSavedConfig();
+    const resolvedUrl = baseUrl || saved.keys?.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434/api';
+    
+    try {
+      if (resolvedUrl.includes('/v1')) {
+        const res = await fetch(`${resolvedUrl}/models`, {
+          headers: { 'Authorization': 'Bearer lm-studio' }
+        });
+        if (!res.ok) throw new Error(`HTTP status ${res.status}`);
+        const json = (await res.json()) as { data?: Array<{ id: string }> };
+        const models = json.data?.map(m => m.id) || [];
+        return { success: true, data: models };
+      } else {
+        const tagsUrl = resolvedUrl.endsWith('/api') ? `${resolvedUrl}/tags` : `${resolvedUrl}/api/tags`;
+        const res = await fetch(tagsUrl);
+        if (!res.ok) throw new Error(`HTTP status ${res.status}`);
+        const json = (await res.json()) as { models?: Array<{ name: string }> };
+        const models = json.models?.map(m => m.name) || [];
+        return { success: true, data: models };
+      }
+    } catch (err: any) {
+      return { success: false, error: `Failed to fetch models: ${err.message}`, data: [] };
+    }
+  });
+
   fastify.get('/config', { preHandler: requireAdmin }, async () => {
     const router = getModelRouter();
     const saved = loadSavedConfig();
     const { keys = {}, ...models } = saved;
 
-    // Mask keys
     const maskedKeys = {
       ollamaBaseUrl: keys.ollamaBaseUrl || '',
-      openaiApiKey: keys.openaiApiKey ? '*****' : '',
-      anthropicApiKey: keys.anthropicApiKey ? '*****' : '',
-      googleApiKey: keys.googleApiKey ? '*****' : '',
-      groqApiKey: keys.groqApiKey ? '*****' : '',
-      openrouterApiKey: keys.openrouterApiKey ? '*****' : '',
     };
 
     return {
       success: true,
       data: {
         models: {
-          low: models.low || { provider: 'ollama', model: 'qwen2.5-coder:7b' },
-          medium: models.medium || { provider: 'ollama', model: 'qwen2.5-coder:32b' },
-          high: models.high || { provider: 'ollama', model: 'qwen2.5-coder:32b' },
-          embedding: models.embedding || { provider: 'ollama', model: 'nomic-embed-text' },
+          low: localRouteOrDefault(models.low, defaultModels.low),
+          medium: localRouteOrDefault(models.medium, defaultModels.medium),
+          high: localRouteOrDefault(models.high, defaultModels.high),
+          embedding: localRouteOrDefault(models.embedding, defaultModels.embedding),
         },
         keys: maskedKeys,
         availableProviders: router.getAvailableProviders(),
@@ -47,8 +88,9 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/config', { preHandler: requireAdmin }, async (request, reply) => {
     // M-2: Validate model config body with Zod schema
     const RouteConfigSchema = z.object({
-      provider: z.enum(['ollama', 'openai', 'anthropic', 'google', 'groq', 'openrouter']),
+      provider: z.literal('ollama'),
       model: z.string().min(1).max(200),
+      ollamaBaseUrl: z.string().optional().or(z.null()),
     });
     const BodySchema = z.object({
       models: z.object({
@@ -59,11 +101,6 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
       }).optional(),
       keys: z.object({
         ollamaBaseUrl: z.string().url().optional().or(z.literal('')),
-        openaiApiKey: z.string().optional(),
-        anthropicApiKey: z.string().optional(),
-        googleApiKey: z.string().optional(),
-        groqApiKey: z.string().optional(),
-        openrouterApiKey: z.string().optional(),
       }).optional(),
     });
 
@@ -77,18 +114,22 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
 
     const newKeys = {
       ollamaBaseUrl: body.keys?.ollamaBaseUrl !== undefined ? body.keys.ollamaBaseUrl : (currentKeys.ollamaBaseUrl || ''),
-      openaiApiKey: body.keys?.openaiApiKey !== undefined && body.keys.openaiApiKey !== '*****' ? body.keys.openaiApiKey : (currentKeys.openaiApiKey || ''),
-      anthropicApiKey: body.keys?.anthropicApiKey !== undefined && body.keys.anthropicApiKey !== '*****' ? body.keys.anthropicApiKey : (currentKeys.anthropicApiKey || ''),
-      googleApiKey: body.keys?.googleApiKey !== undefined && body.keys.googleApiKey !== '*****' ? body.keys.googleApiKey : (currentKeys.googleApiKey || ''),
-      groqApiKey: body.keys?.groqApiKey !== undefined && body.keys.groqApiKey !== '*****' ? body.keys.groqApiKey : (currentKeys.groqApiKey || ''),
-      openrouterApiKey: body.keys?.openrouterApiKey !== undefined && body.keys.openrouterApiKey !== '*****' ? body.keys.openrouterApiKey : (currentKeys.openrouterApiKey || ''),
+    };
+
+    const cleanRoute = (route: any) => {
+      if (!route) return undefined;
+      return {
+        provider: route.provider,
+        model: route.model,
+        ollamaBaseUrl: route.ollamaBaseUrl || undefined,
+      };
     };
 
     const newConfig = {
-      low: body.models?.low,
-      medium: body.models?.medium,
-      high: body.models?.high,
-      embedding: body.models?.embedding,
+      low: cleanRoute(body.models?.low),
+      medium: cleanRoute(body.models?.medium),
+      high: cleanRoute(body.models?.high),
+      embedding: cleanRoute(body.models?.embedding),
       keys: newKeys,
     };
 

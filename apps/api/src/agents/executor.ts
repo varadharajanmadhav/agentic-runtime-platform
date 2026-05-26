@@ -265,7 +265,7 @@ JSON Array:`;
       messages: compiled.messages,
       tools: toolsObj,
       maxSteps: 20,
-      maxTokens: (route as any).maxTokens ?? (route.provider === 'groq' ? 1024 : undefined),
+      maxTokens: (route as any).maxTokens,
       maxRetries: 0,
       onError: ({ error }) => {
         streamError = error instanceof Error ? error : new Error(
