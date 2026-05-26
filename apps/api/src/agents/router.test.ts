@@ -5,7 +5,7 @@ describe('ModelRouter', () => {
   it('should initialize and load router singleton', () => {
     const router = getModelRouter();
     expect(router).toBeDefined();
-    expect(router.getAvailableProviders()).toEqual(['ollama', 'openai', 'anthropic', 'google', 'groq']);
+    expect(router.getAvailableProviders()).toEqual(['ollama', 'openai', 'anthropic', 'google', 'groq', 'openrouter']);
   });
 
   it('should resolve routing configurations for different complexities', () => {
@@ -30,6 +30,15 @@ describe('ModelRouter', () => {
     expect(modelInstance).toBeDefined();
     expect(modelInstance.modelId).toBe('gpt-4o');
     expect(modelInstance.provider).toBe('openai.chat');
+  });
+
+  it('should resolve OpenRouter as an OpenAI-compatible provider', () => {
+    const router = new ModelRouter({ openrouterApiKey: 'test-key' });
+    const modelInstance = router.getModelByProvider('openrouter', 'openai/gpt-4o-mini');
+
+    expect(modelInstance).toBeDefined();
+    expect(modelInstance.modelId).toBe('openai/gpt-4o-mini');
+    expect(modelInstance.provider).toBe('openrouter.chat');
   });
 
   it('should throw an error for unsupported model providers', () => {

@@ -23,6 +23,7 @@ export interface ModelRouterOptions {
   anthropicApiKey?: string;
   googleApiKey?: string;
   groqApiKey?: string;
+  openrouterApiKey?: string;
 }
 
 export interface RouteConfig {
@@ -129,6 +130,7 @@ export class ModelRouter {
   private anthropic: ReturnType<typeof createAnthropic>;
   private google: ReturnType<typeof createGoogleGenerativeAI>;
   private groq: ReturnType<typeof createOpenAI>;
+  private openrouter: ReturnType<typeof createOpenAI>;
   private config: RouterConfig;
 
   constructor(options: ModelRouterOptions = {}, config?: Partial<RouterConfig>) {
@@ -175,6 +177,18 @@ export class ModelRouter {
       apiKey: groqKey || 'dummy-key',
       fetch: customFetch,
     });
+
+    const openrouterKey = options.openrouterApiKey ?? keys.openrouterApiKey ?? process.env.OPENROUTER_API_KEY ?? '';
+    this.openrouter = createOpenAI({
+      name: 'openrouter',
+      baseURL: 'https://openrouter.ai/api/v1',
+      apiKey: openrouterKey || 'dummy-key',
+      headers: {
+        'HTTP-Referer': process.env.OPENROUTER_SITE_URL ?? 'http://localhost:5173',
+        'X-Title': process.env.OPENROUTER_APP_NAME ?? 'Agentic Runtime Platform',
+      },
+      fetch: customFetch,
+    });
   }
 
   getModel(complexity: TaskComplexity): LanguageModel {
@@ -207,6 +221,8 @@ export class ModelRouter {
         return this.google(model);
       case 'groq':
         return this.groq(model);
+      case 'openrouter':
+        return this.openrouter(model);
       default:
         throw new Error(`Unsupported model provider: ${provider}`);
     }
@@ -237,7 +253,7 @@ export class ModelRouter {
   }
 
   getAvailableProviders(): ModelProvider[] {
-    return ['ollama', 'openai', 'anthropic', 'google', 'groq'];
+    return ['ollama', 'openai', 'anthropic', 'google', 'groq', 'openrouter'];
   }
 }
 

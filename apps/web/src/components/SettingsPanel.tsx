@@ -49,6 +49,7 @@ export function SettingsPanel() {
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
   const [googleApiKey, setGoogleApiKey] = useState('');
   const [groqApiKey, setGroqApiKey] = useState('');
+  const [openrouterApiKey, setOpenrouterApiKey] = useState('');
 
   // Extended state local hooks (saved alongside other settings)
   const [localMaxSteps, setLocalMaxSteps] = useState(20);
@@ -77,6 +78,7 @@ export function SettingsPanel() {
       setAnthropicApiKey(settings.keys?.anthropicApiKey || '');
       setGoogleApiKey(settings.keys?.googleApiKey || '');
       setGroqApiKey(settings.keys?.groqApiKey || '');
+      setOpenrouterApiKey(settings.keys?.openrouterApiKey || '');
     }
   }, [settings]);
 
@@ -113,7 +115,8 @@ export function SettingsPanel() {
       openaiApiKey: openaiApiKey,
       anthropicApiKey: anthropicApiKey,
       googleApiKey: googleApiKey,
-      groqApiKey: groqApiKey
+      groqApiKey: groqApiKey,
+      openrouterApiKey: openrouterApiKey
     };
 
     const result = await saveSettings(models as any, keys as any);
@@ -428,6 +431,7 @@ export function SettingsPanel() {
                         else if (prov === 'google') setLowModel('gemini-1.5-flash');
                         else if (prov === 'ollama') setLowModel('qwen2.5-coder:7b');
                         else if (prov === 'groq') setLowModel('llama-3.3-70b-versatile');
+                        else if (prov === 'openrouter') setLowModel('openai/gpt-4o-mini');
                       }}
                     >
                       <option value="ollama">Ollama</option>
@@ -435,6 +439,7 @@ export function SettingsPanel() {
                       <option value="anthropic">Anthropic</option>
                       <option value="google">Google</option>
                       <option value="groq">Groq</option>
+                      <option value="openrouter">OpenRouter</option>
                     </select>
                     <input className="input-base" style={{ flex: 1 }} value={lowModel} onChange={e => setLowModel(e.target.value)} placeholder="Model name" />
                   </div>
@@ -456,6 +461,7 @@ export function SettingsPanel() {
                         else if (prov === 'google') setMedModel('gemini-1.5-pro');
                         else if (prov === 'ollama') setMedModel('qwen2.5-coder:32b');
                         else if (prov === 'groq') setMedModel('llama-3.3-70b-versatile');
+                        else if (prov === 'openrouter') setMedModel('openai/gpt-4o');
                       }}
                     >
                       <option value="ollama">Ollama</option>
@@ -463,6 +469,7 @@ export function SettingsPanel() {
                       <option value="anthropic">Anthropic</option>
                       <option value="google">Google</option>
                       <option value="groq">Groq</option>
+                      <option value="openrouter">OpenRouter</option>
                     </select>
                     <input className="input-base" style={{ flex: 1 }} value={medModel} onChange={e => setMedModel(e.target.value)} placeholder="Model name" />
                   </div>
@@ -484,6 +491,7 @@ export function SettingsPanel() {
                         else if (prov === 'google') setHighModel('gemini-1.5-pro');
                         else if (prov === 'ollama') setHighModel('qwen2.5-coder:32b');
                         else if (prov === 'groq') setHighModel('llama-3.3-70b-versatile');
+                        else if (prov === 'openrouter') setHighModel('anthropic/claude-3.5-sonnet');
                       }}
                     >
                       <option value="ollama">Ollama</option>
@@ -491,6 +499,7 @@ export function SettingsPanel() {
                       <option value="anthropic">Anthropic</option>
                       <option value="google">Google</option>
                       <option value="groq">Groq</option>
+                      <option value="openrouter">OpenRouter</option>
                     </select>
                     <input className="input-base" style={{ flex: 1 }} value={highModel} onChange={e => setHighModel(e.target.value)} placeholder="Model name" />
                   </div>
@@ -577,6 +586,18 @@ export function SettingsPanel() {
                     value={groqApiKey} 
                     onChange={e => setGroqApiKey(e.target.value)} 
                     placeholder={groqApiKey === '*****' ? '••••••••' : 'gsk_...'} 
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>OpenRouter API Key</label>
+                  <input 
+                    type="password"
+                    className="input-base" 
+                    style={{ width: '100%' }} 
+                    value={openrouterApiKey} 
+                    onChange={e => setOpenrouterApiKey(e.target.value)} 
+                    placeholder={openrouterApiKey === '*****' ? '••••••••' : 'sk-or-v1-...'} 
                   />
                 </div>
               </div>

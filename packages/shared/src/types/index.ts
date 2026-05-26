@@ -107,7 +107,7 @@ export interface TokenUsage {
 }
 
 // Tool types
-export type ToolPermission = 'read_file' | 'write_file' | 'run_terminal' | 'search_files' | 'git_diff' | 'web_fetch' | 'mcp' | 'git_log' | 'git_show' | 'dotnet_build' | 'dotnet_test' | 'npm_run' | 'npm_install';
+export type ToolPermission = 'read_file' | 'write_file' | 'run_terminal' | 'search_files' | 'print_tree' | 'git_diff' | 'web_fetch' | 'mcp' | 'git_log' | 'git_show' | 'dotnet_build' | 'dotnet_test' | 'npm_run' | 'npm_install';
 
 export interface ToolCall {
   id: string;
@@ -153,7 +153,7 @@ export interface Message {
 }
 
 // Model provider types
-export type ModelProvider = 'ollama' | 'openai' | 'anthropic' | 'google' | 'groq';
+export type ModelProvider = 'ollama' | 'openai' | 'anthropic' | 'google' | 'groq' | 'openrouter';
 
 export interface ModelConfig {
   provider: ModelProvider;

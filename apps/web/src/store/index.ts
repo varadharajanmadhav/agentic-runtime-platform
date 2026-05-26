@@ -55,6 +55,7 @@ interface SettingsConfig {
     anthropicApiKey?: string;
     googleApiKey?: string;
     groqApiKey?: string;
+    openrouterApiKey?: string;
   };
   availableProviders: string[];
 }

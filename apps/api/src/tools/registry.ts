@@ -4,6 +4,7 @@ import {
   WriteFileInputSchema,
   RunTerminalInputSchema,
   SearchFilesInputSchema,
+  PrintTreeInputSchema,
   GitDiffInputSchema,
   WebFetchInputSchema,
   GitLogInputSchema,
@@ -17,6 +18,7 @@ import { readFileTool } from './read-file.js';
 import { writeFileTool } from './write-file.js';
 import { runTerminalTool } from './run-terminal.js';
 import { searchFilesTool } from './search-files.js';
+import { printTreeTool } from './print-tree.js';
 import { gitDiffTool } from './git-diff.js';
 import { webFetchTool } from './web-fetch.js';
 import { gitLogTool } from './git-log.js';
@@ -114,6 +116,7 @@ export function getToolRegistry(): ToolRegistry {
     registryInstance.register(writeFileTool);
     registryInstance.register(runTerminalTool);
     registryInstance.register(searchFilesTool);
+    registryInstance.register(printTreeTool);
     registryInstance.register(gitDiffTool);
     registryInstance.register(webFetchTool);
     registryInstance.register(gitLogTool);

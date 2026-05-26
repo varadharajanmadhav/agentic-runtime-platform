@@ -9,6 +9,7 @@ describe('ToolRegistry', () => {
     const tools = registry.listTools();
     expect(tools.length).toBeGreaterThan(0);
     expect(tools.some(t => t.name === 'read_file')).toBe(true);
+    expect(tools.some(t => t.name === 'print_tree')).toBe(true);
   });
 
   it('should retrieve a registered tool by name', () => {

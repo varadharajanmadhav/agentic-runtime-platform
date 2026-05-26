@@ -367,18 +367,7 @@ JSON Array:`;
         await updateStepStatus(s.id, 'skipped');
       }
     }
-    let errorMsg = 'Unknown error';
-    if (err instanceof Error) {
-      errorMsg = err.stack || err.message;
-    } else if (err && typeof err === 'object') {
-      try {
-        errorMsg = JSON.stringify(err);
-      } catch {
-        errorMsg = String(err);
-      }
-    } else {
-      errorMsg = String(err);
-    }
+    const errorMsg = formatTaskError(err);
     const [currentTask] = await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
     // M-3: Use only DB status for cancellation detection, not fragile string matching
     const isCancelled = currentTask?.status === 'cancelled';
@@ -427,6 +416,113 @@ JSON Array:`;
   }
 }
 
+export function formatTaskError(err: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+
+  function appendError(error: unknown, prefix = '') {
+    if (error === null || error === undefined) {
+      parts.push(`${prefix}Unknown error`);
+      return;
+    }
+
+    if (seen.has(error)) return;
+    seen.add(error);
+
+    if (typeof error === 'string') {
+      parts.push(`${prefix}${error}`);
+      return;
+    }
+
+    if (typeof error !== 'object') {
+      parts.push(`${prefix}${String(error)}`);
+      return;
+    }
+
+    const record = error as Record<string, unknown>;
+    const name = typeof record.name === 'string' ? record.name : undefined;
+    const message = typeof record.message === 'string' ? record.message : undefined;
+    const statusCode = typeof record.statusCode === 'number' ? record.statusCode : undefined;
+    const url = typeof record.url === 'string' ? record.url : undefined;
+    const responseBody = typeof record.responseBody === 'string' ? record.responseBody : undefined;
+    const data = record.data;
+
+    if (name || message) {
+      parts.push(`${prefix}${[name, message].filter(Boolean).join(': ')}`);
+    }
+
+    if (statusCode !== undefined) {
+      parts.push(`${prefix}HTTP status: ${statusCode}`);
+    }
+
+    if (url) {
+      parts.push(`${prefix}URL: ${url}`);
+    }
+
+    const providerDetail = formatProviderDetail(responseBody, data);
+    if (providerDetail) {
+      parts.push(`${prefix}Provider response: ${providerDetail}`);
+    }
+
+    if (record.cause) {
+      appendError(record.cause, `${prefix}Cause: `);
+    }
+
+    if (parts.length === 0) {
+      try {
+        parts.push(`${prefix}${JSON.stringify(error, null, 2)}`);
+      } catch {
+        parts.push(`${prefix}${String(error)}`);
+      }
+    }
+  }
+
+  appendError(err);
+  return parts.join('\n');
+}
+
+function formatProviderDetail(responseBody?: string, data?: unknown): string {
+  if (data !== undefined) {
+    const formattedData = formatUnknownDetail(data);
+    if (formattedData) return formattedData;
+  }
+
+  if (!responseBody) return '';
+
+  try {
+    return formatUnknownDetail(JSON.parse(responseBody)) || responseBody;
+  } catch {
+    return responseBody;
+  }
+}
+
+function formatUnknownDetail(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value !== 'object') return String(value);
+
+  const record = value as Record<string, unknown>;
+  const error = record.error;
+  if (error && typeof error === 'object') {
+    const errorRecord = error as Record<string, unknown>;
+    const message = typeof errorRecord.message === 'string' ? errorRecord.message : undefined;
+    const code = typeof errorRecord.code === 'string' || typeof errorRecord.code === 'number'
+      ? String(errorRecord.code)
+      : undefined;
+    if (message && code) return `${message} (${code})`;
+    if (message) return message;
+  }
+
+  const message = typeof record.message === 'string' ? record.message : undefined;
+  if (message) return message;
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 async function saveEvent(
   taskId: string,
   sessionId: string,
@@ -442,4 +538,3 @@ async function saveEvent(
     payload,
   });
 }
-

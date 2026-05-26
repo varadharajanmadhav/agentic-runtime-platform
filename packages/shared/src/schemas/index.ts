@@ -52,6 +52,13 @@ export const SearchFilesInputSchema = z.object({
   includeLineNumbers: z.boolean().default(true),
 });
 
+export const PrintTreeInputSchema = z.object({
+  directory: z.string().default('.').describe('Directory to print as a tree'),
+  maxDepth: z.number().int().min(1).max(10).default(3),
+  maxEntries: z.number().int().min(1).max(500).default(200),
+  includeHidden: z.boolean().default(false),
+});
+
 export const GitDiffInputSchema = z.object({
   directory: z.string().default('.').describe('Git repository directory'),
   staged: z.boolean().default(false).describe('Show staged changes'),
@@ -123,7 +130,7 @@ export const JwtPayloadSchema = z.object({
 
 // ── Model config schema ────────────────────────────────────────
 export const ModelConfigSchema = z.object({
-  provider: z.enum(['ollama', 'openai', 'anthropic', 'google', 'groq']),
+  provider: z.enum(['ollama', 'openai', 'anthropic', 'google', 'groq', 'openrouter']),
   model: z.string(),
   maxTokens: z.number().int().positive().optional(),
   temperature: z.number().min(0).max(2).optional(),
@@ -137,6 +144,7 @@ export type ReadFileInput = z.infer<typeof ReadFileInputSchema>;
 export type WriteFileInput = z.infer<typeof WriteFileInputSchema>;
 export type RunTerminalInput = z.infer<typeof RunTerminalInputSchema>;
 export type SearchFilesInput = z.infer<typeof SearchFilesInputSchema>;
+export type PrintTreeInput = z.infer<typeof PrintTreeInputSchema>;
 export type GitDiffInput = z.infer<typeof GitDiffInputSchema>;
 export type WebFetchInput = z.infer<typeof WebFetchInputSchema>;
 export type GitLogInput = z.infer<typeof GitLogInputSchema>;

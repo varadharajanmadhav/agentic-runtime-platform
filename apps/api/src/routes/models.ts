@@ -26,6 +26,7 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
       anthropicApiKey: keys.anthropicApiKey ? '*****' : '',
       googleApiKey: keys.googleApiKey ? '*****' : '',
       groqApiKey: keys.groqApiKey ? '*****' : '',
+      openrouterApiKey: keys.openrouterApiKey ? '*****' : '',
     };
 
     return {
@@ -46,7 +47,7 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/config', { preHandler: requireAdmin }, async (request, reply) => {
     // M-2: Validate model config body with Zod schema
     const RouteConfigSchema = z.object({
-      provider: z.enum(['ollama', 'openai', 'anthropic', 'google', 'groq']),
+      provider: z.enum(['ollama', 'openai', 'anthropic', 'google', 'groq', 'openrouter']),
       model: z.string().min(1).max(200),
     });
     const BodySchema = z.object({
@@ -62,6 +63,7 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
         anthropicApiKey: z.string().optional(),
         googleApiKey: z.string().optional(),
         groqApiKey: z.string().optional(),
+        openrouterApiKey: z.string().optional(),
       }).optional(),
     });
 
@@ -79,6 +81,7 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
       anthropicApiKey: body.keys?.anthropicApiKey !== undefined && body.keys.anthropicApiKey !== '*****' ? body.keys.anthropicApiKey : (currentKeys.anthropicApiKey || ''),
       googleApiKey: body.keys?.googleApiKey !== undefined && body.keys.googleApiKey !== '*****' ? body.keys.googleApiKey : (currentKeys.googleApiKey || ''),
       groqApiKey: body.keys?.groqApiKey !== undefined && body.keys.groqApiKey !== '*****' ? body.keys.groqApiKey : (currentKeys.groqApiKey || ''),
+      openrouterApiKey: body.keys?.openrouterApiKey !== undefined && body.keys.openrouterApiKey !== '*****' ? body.keys.openrouterApiKey : (currentKeys.openrouterApiKey || ''),
     };
 
     const newConfig = {
