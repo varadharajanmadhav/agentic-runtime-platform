@@ -19,6 +19,7 @@ import { writeFileTool } from './write-file.js';
 import { runTerminalTool } from './run-terminal.js';
 import { searchFilesTool } from './search-files.js';
 import { printTreeTool } from './print-tree.js';
+import { findFilesTool } from './find-files.js';
 import { gitDiffTool } from './git-diff.js';
 import { webFetchTool } from './web-fetch.js';
 import { gitLogTool } from './git-log.js';
@@ -116,6 +117,7 @@ export function getToolRegistry(): ToolRegistry {
     registryInstance.register(writeFileTool);
     registryInstance.register(runTerminalTool);
     registryInstance.register(searchFilesTool);
+    registryInstance.register(findFilesTool);
     registryInstance.register(printTreeTool);
     registryInstance.register(gitDiffTool);
     registryInstance.register(webFetchTool);

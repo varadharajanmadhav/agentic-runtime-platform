@@ -1,6 +1,6 @@
 import { estimateTokenCount } from '@arp/shared';
 import type { ContextItem, ToolCall } from '@arp/shared';
-import { adaptPrompt, getModelContextWindow } from '@arp/ai';
+import { adaptPrompt, getModelContextWindow, getModelRouter } from '@arp/ai';
 import { createTokenBudget, allocateContextItems } from '@arp/ai';
 import type { ModelProvider } from '@arp/shared';
 
@@ -32,7 +32,7 @@ const AGENT_SYSTEM_PROMPT = `You are ARP, an expert software engineering agent. 
 
 You have access to tools to:
 - Read and write files
-- Run terminal commands  
+- Run terminal commands
 - Search the codebase
 - Fetch web content
 - View git diffs
@@ -42,6 +42,18 @@ You have access to tools to:
 - Run C# unit tests (dotnet_test)
 - Run JavaScript/TypeScript npm scripts (npm_run)
 - Install JavaScript/TypeScript node modules (npm_install)
+
+## Tool selection rules — follow these exactly:
+
+**Finding files by name** (user says "list files", "find files", "show files related to X"):
+→ Use \`find_files\` with pattern=X. This searches recursively by FILENAME across all subdirectories.
+→ NEVER use \`search_files\` for this — it searches file contents, not filenames.
+
+**Searching inside file contents** (user says "find where X is used", "grep for X", "which files contain X"):
+→ Use \`search_files\` with query=X.
+
+**Exploring directory structure**:
+→ Use \`print_tree\` to see the folder layout before deciding where to look.
 
 Guidelines:
 - Always verify your understanding before making changes
@@ -78,7 +90,9 @@ function trimConversationHistory(
 }
 
 export function compilePrompt(options: CompilePromptOptions): CompiledPrompt {
-  const contextWindow = getModelContextWindow(options.provider, options.model);
+  const router = getModelRouter();
+  const maxContextConstraint = router.getMaxContextWindowConstraint();
+  const contextWindow = maxContextConstraint || getModelContextWindow(options.provider, options.model);
   const systemPrompt = buildSystemPrompt(options);
   const systemTokens = estimateTokenCount(systemPrompt);
   const toolSchemaTokens = options.availableToolNames.length * 200; // ~200 tokens per tool schema
@@ -118,6 +132,7 @@ export function compilePrompt(options: CompilePromptOptions): CompiledPrompt {
     model: options.model,
     systemPrompt: systemPrompt + contextSection + stateSection,
     taskDescription: options.taskDescription,
+    disableThinking: router.getDisableThinkingConstraint(),
   });
 
   const trimmedHistory = trimConversationHistory(options.conversationHistory, 10000);

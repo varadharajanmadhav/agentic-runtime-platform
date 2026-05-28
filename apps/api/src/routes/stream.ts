@@ -2,9 +2,11 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { WebSocket } from '@fastify/websocket';
 import { getDb, agentEvents, eq, desc } from '@arp/db';
 import { getEventEmitter } from '../lib/events.js';
+import { STREAM } from '../config/constants.js';
 
 export const streamRoutes: FastifyPluginAsync = async (fastify) => {
   // SSE stream for a specific task
+  // Auth is enforced by the global onRequest hook in app.ts
   fastify.get<{ Params: { taskId: string } }>('/task/:taskId', async (request, reply) => {
     const { taskId } = request.params;
 
@@ -12,7 +14,6 @@ export const streamRoutes: FastifyPluginAsync = async (fastify) => {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
       'X-Accel-Buffering': 'no',
     });
 
@@ -35,7 +36,6 @@ export const streamRoutes: FastifyPluginAsync = async (fastify) => {
       sendEvent(event.type, event.payload);
     }
 
-    // Subscribe to live events
     const handler = (data: unknown) => {
       if (typeof data === 'object' && data !== null && 'type' in data) {
         const e = data as { type: string; payload: unknown };
@@ -45,18 +45,21 @@ export const streamRoutes: FastifyPluginAsync = async (fastify) => {
 
     emitter.on(channel, handler);
 
-    // Heartbeat every 30s
     const heartbeat = setInterval(() => {
       reply.raw.write(': ping\n\n');
-    }, 30000);
+    }, STREAM.HEARTBEAT_MS);
 
-    // Cleanup on disconnect
+    // Auto-disconnect after max lifetime to prevent resource leaks
+    const maxLifetime = setTimeout(() => {
+      reply.raw.end();
+    }, STREAM.MAX_WS_LIFETIME_MS);
+
     request.raw.on('close', () => {
       clearInterval(heartbeat);
+      clearTimeout(maxLifetime);
       emitter.off(channel, handler);
     });
 
-    // Keep connection open
     await new Promise<void>((resolve) => {
       request.raw.on('close', resolve);
     });
@@ -70,7 +73,6 @@ export const streamRoutes: FastifyPluginAsync = async (fastify) => {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
       'X-Accel-Buffering': 'no',
     });
 
@@ -89,17 +91,19 @@ export const streamRoutes: FastifyPluginAsync = async (fastify) => {
     };
 
     emitter.on(channel, handler);
-    const heartbeat = setInterval(() => { reply.raw.write(': ping\n\n'); }, 30000);
+    const heartbeat = setInterval(() => { reply.raw.write(': ping\n\n'); }, STREAM.HEARTBEAT_MS);
+    const maxLifetime = setTimeout(() => { reply.raw.end(); }, STREAM.MAX_WS_LIFETIME_MS);
 
     request.raw.on('close', () => {
       clearInterval(heartbeat);
+      clearTimeout(maxLifetime);
       emitter.off(channel, handler);
     });
 
     await new Promise<void>((resolve) => { request.raw.on('close', resolve); });
   });
 
-  // WebSocket stream for a specific task — real-time events
+  // WebSocket stream for a specific task — auth handled by global onRequest hook via ?token=
   fastify.get<{ Params: { taskId: string } }>(
     '/task/:taskId/ws',
     { websocket: true },
@@ -126,11 +130,10 @@ export const streamRoutes: FastifyPluginAsync = async (fastify) => {
           sendWs(event.type, event.payload);
         }
         sendWs('history_end', { taskId });
-      } catch (err) {
+      } catch {
         sendWs('error', { message: 'Failed to load history' });
       }
 
-      // Subscribe to live events
       const handler = (event: unknown) => {
         if (typeof event === 'object' && event !== null && 'type' in event) {
           const e = event as { type: string; payload: unknown };
@@ -140,23 +143,25 @@ export const streamRoutes: FastifyPluginAsync = async (fastify) => {
 
       emitter.on(channel, handler);
 
-      // Heartbeat ping every 30s
       const heartbeat = setInterval(() => {
         if (socket.readyState === socket.OPEN) {
           socket.send(JSON.stringify({ type: 'ping', data: {} }));
         }
-      }, 30000);
+      }, STREAM.HEARTBEAT_MS);
 
-      socket.on('close', () => {
-        clearInterval(heartbeat);
-        emitter.off(channel, handler);
-      });
+      // Disconnect after max lifetime
+      const maxLifetime = setTimeout(() => {
+        socket.close(1001, 'Connection max lifetime reached');
+      }, STREAM.MAX_WS_LIFETIME_MS);
 
-      socket.on('error', () => {
+      const cleanup = () => {
         clearInterval(heartbeat);
+        clearTimeout(maxLifetime);
         emitter.off(channel, handler);
-      });
+      };
+
+      socket.on('close', cleanup);
+      socket.on('error', cleanup);
     }
   );
 };
-

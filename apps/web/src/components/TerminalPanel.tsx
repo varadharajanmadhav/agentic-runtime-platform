@@ -6,13 +6,15 @@ import { useAppStore } from '../store/index.js';
 import { Terminal as TerminalIcon, RefreshCw, Trash2 } from 'lucide-react';
 
 export function TerminalPanel() {
-  const { events, activeTaskId, tasks } = useAppStore();
+  const { events, activeTaskId, tasks, sessions, activeSessionId } = useAppStore();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const printedEventIds = useRef<Set<string>>(new Set());
 
   const activeTask = tasks.find(t => t.id === activeTaskId);
+  const activeSession = sessions.find(s => s.id === activeSessionId);
+  const workspaceDir = activeSession?.workspaceDir ?? null;
 
   // Initialize Terminal
   useEffect(() => {
@@ -73,15 +75,19 @@ export function TerminalPanel() {
     };
   }, []);
 
+  // Print workspace dir when session changes
+  useEffect(() => {
+    if (!xtermRef.current || !workspaceDir) return;
+    xtermRef.current.writeln(`\x1b[90m\x1b[2m$ cd ${workspaceDir}\x1b[0m`);
+  }, [activeSessionId, workspaceDir]);
+
   // Handle activeTask change - clear and reset
   useEffect(() => {
     if (!xtermRef.current) return;
-    
-    // Clear terminal contents and set up history replay
     xtermRef.current.clear();
     xtermRef.current.writeln(`\x1b[1;34m[System] Switched to Task: ${activeTask?.title || 'System Feed'}\x1b[0m`);
+    if (workspaceDir) xtermRef.current.writeln(`\x1b[90m$ cd ${workspaceDir}\x1b[0m`);
     xtermRef.current.writeln(`\x1b[90mID: ${activeTaskId || 'none'}\x1b[0m\r\n`);
-    
     printedEventIds.current.clear();
   }, [activeTaskId, activeTask?.title]);
 
@@ -200,16 +206,16 @@ export function TerminalPanel() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <TerminalIcon size={16} style={{ color: '#22c55e', flexShrink: 0 }} />
-          <span style={{
-            fontSize: '13px',
-            fontWeight: 600,
-            color: '#e2e8f0',
-            textOverflow: 'ellipsis',
-            overflow: 'hidden',
-            whiteSpace: 'nowrap'
-          }}>
-            Terminal Output {activeTask ? `— ${activeTask.title}` : ''}
-          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Terminal Output {activeTask ? `— ${activeTask.title}` : ''}
+            </span>
+            {workspaceDir && (
+              <span style={{ fontSize: '10px', color: '#71717a', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {workspaceDir}
+              </span>
+            )}
+          </div>
           {activeTask?.status === 'executing' && (
             <span style={{
               display: 'inline-flex',

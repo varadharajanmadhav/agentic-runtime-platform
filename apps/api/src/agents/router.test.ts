@@ -46,4 +46,12 @@ describe('ModelRouter', () => {
       (router as any).resolveLanguageModel('invalid_provider', 'model');
     }).toThrow('Unsupported model provider: invalid_provider');
   });
+
+  it('should support disableThinking routing configuration and getter', () => {
+    const router = new ModelRouter({}, { disableThinking: true });
+    expect(router.getDisableThinkingConstraint()).toBe(true);
+
+    const routerFalse = new ModelRouter({}, { disableThinking: false });
+    expect(routerFalse.getDisableThinkingConstraint()).toBe(false);
+  });
 });

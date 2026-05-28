@@ -80,6 +80,8 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
           embedding: localRouteOrDefault(models.embedding, defaultModels.embedding),
         },
         keys: maskedKeys,
+        maxContextWindow: saved.maxContextWindow || null,
+        disableThinking: saved.disableThinking || false,
         availableProviders: router.getAvailableProviders(),
       },
     };
@@ -102,6 +104,8 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
       keys: z.object({
         ollamaBaseUrl: z.string().url().optional().or(z.literal('')),
       }).optional(),
+      maxContextWindow: z.number().int().min(1024).max(200000).optional().or(z.null()),
+      disableThinking: z.boolean().optional(),
     });
 
     const parsed = BodySchema.safeParse(request.body);
@@ -130,6 +134,8 @@ export const modelRoutes: FastifyPluginAsync = async (fastify) => {
       medium: cleanRoute(body.models?.medium),
       high: cleanRoute(body.models?.high),
       embedding: cleanRoute(body.models?.embedding),
+      maxContextWindow: body.maxContextWindow || undefined,
+      disableThinking: body.disableThinking !== undefined ? body.disableThinking : undefined,
       keys: newKeys,
     };
 

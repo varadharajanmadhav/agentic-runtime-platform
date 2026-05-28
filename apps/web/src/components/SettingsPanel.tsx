@@ -90,6 +90,8 @@ export function SettingsPanel() {
   const [localRequireApproval, setLocalRequireApproval] = useState(false);
   const [localInstructions, setLocalInstructions] = useState('');
   const [localExcludes, setLocalExcludes] = useState('');
+  const [localMaxContextWindow, setLocalMaxContextWindow] = useState<number | ''>('');
+  const [localDisableThinking, setLocalDisableThinking] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -109,6 +111,8 @@ export function SettingsPanel() {
       setEmbedBaseUrl(settings.models?.embedding?.ollamaBaseUrl || '');
 
       setOllamaBaseUrl(settings.keys?.ollamaBaseUrl || '');
+      setLocalMaxContextWindow(settings.maxContextWindow ?? '');
+      setLocalDisableThinking(settings.disableThinking || false);
     }
   }, [settings]);
 
@@ -164,7 +168,7 @@ export function SettingsPanel() {
       ollamaBaseUrl: ollamaBaseUrl,
     };
 
-    const result = await saveSettings(models as any, keys as any);
+    const result = await saveSettings(models as any, keys as any, localMaxContextWindow === '' ? null : Number(localMaxContextWindow), localDisableThinking);
     setSaving(false);
     if (result.success) {
       setSaveSuccess(true);
@@ -177,12 +181,8 @@ export function SettingsPanel() {
 
   // Swatch configuration for Appearance preview
   const THEME_SWATCHES = [
-    { id: 'obsidian', name: 'Obsidian Dark', bg: '#090d16', panel: '#0f1524', text: '#cbd5e1', accent: '#6366f1' },
-    { id: 'nord', name: 'Nord Dark', bg: '#232831', panel: '#2e3440', text: '#e5e9f0', accent: '#88c0d0' },
-    { id: 'matrix', name: 'Matrix Terminal', bg: '#040604', panel: '#0a0d0a', text: '#99cc9f', accent: '#10b981' },
-    { id: 'midnight', name: 'Midnight Onyx', bg: '#0a0a09', panel: '#141412', text: '#d6d3d1', accent: '#d97706' },
-    { id: 'light-glass', name: 'Glass Light', bg: '#f8fafc', panel: '#ffffff', text: '#334155', accent: '#4f46e5' },
-    { id: 'light-nord', name: 'Nordic Snow', bg: '#eceff4', panel: '#ffffff', text: '#3b4252', accent: '#5e81ac' },
+    { id: 'dark', name: 'Dark Mode', bg: '#090d16', panel: '#0f1524', text: '#cbd5e1', accent: '#6366f1' },
+    { id: 'light', name: 'Light Mode', bg: '#f8fafc', panel: '#ffffff', text: '#334155', accent: '#4f46e5' },
   ];
 
   const sidebarTabs: Array<{ id: TabId; label: string; icon: React.ReactNode }> = [
@@ -362,6 +362,51 @@ export function SettingsPanel() {
                   <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
                     Limits the maximum step iterations an agent can process for a single task (default is 20). Prevents runaway loops.
                   </p>
+                </div>
+
+                <div className="divider" />
+
+                {/* Model Thinking Mode */}
+                <div style={{
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px'
+                }}>
+                  <input
+                    type="checkbox"
+                    id="disableThinking"
+                    checked={localDisableThinking}
+                    onChange={e => setLocalDisableThinking(e.target.checked)}
+                    style={{
+                      marginTop: '4px',
+                      cursor: 'pointer',
+                      width: '16px',
+                      height: '16px',
+                      accentColor: 'var(--accent-primary)'
+                    }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <label 
+                      htmlFor="disableThinking"
+                      style={{ 
+                        display: 'block', 
+                        fontSize: '13px', 
+                        fontWeight: 600, 
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer',
+                        userSelect: 'none'
+                      }}
+                    >
+                      Disable Model Thinking (No Think Mode)
+                    </label>
+                    <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
+                      When checked, step-by-step thinking prompts are disabled, and instructions are added to suppress model reasoning chains. Recommended to save tokens and reduce latency.
+                    </span>
+                  </div>
                 </div>
 
                 <div className="divider" />
@@ -599,6 +644,29 @@ export function SettingsPanel() {
                     />
                   </div>
                 </div>
+
+                <div className="divider" style={{ margin: '16px 0' }} />
+
+                {/* Max Context Tokens Constraint */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                    Max Context Tokens Constraint
+                  </label>
+                  <input 
+                    type="number"
+                    min={1024}
+                    max={200000}
+                    className="input-base" 
+                    style={{ width: '180px' }} 
+                    value={localMaxContextWindow} 
+                    onChange={e => setLocalMaxContextWindow(e.target.value ? Number(e.target.value) : '')} 
+                    placeholder="e.g. 4096 (optional)"
+                  />
+                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.4 }}>
+                    Strictly limits the compiled prompt context to prevent exceeding your local LLM server's memory capacity. Leave blank to let the model auto-calculate (default).
+                  </p>
+                </div>
+
               </div>
             )}
 

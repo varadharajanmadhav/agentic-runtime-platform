@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+// Rejects paths that attempt directory traversal outside the workspace
+const safePath = z.string().min(1).refine(
+  (p) => !p.includes('..') && !p.match(/\.\.[/\\]/),
+  { message: 'Path must not contain directory traversal sequences (..)' },
+);
+
 // ── Session schemas ────────────────────────────────────────────
 export const CreateSessionSchema = z.object({
   title: z.string().min(1).max(200),
@@ -22,14 +28,14 @@ export const CreateTaskSchema = z.object({
 
 // ── Tool schemas ───────────────────────────────────────────────
 export const ReadFileInputSchema = z.object({
-  path: z.string().min(1).describe('Absolute or relative path to the file to read'),
+  path: safePath.describe('Absolute or relative path to the file to read'),
   encoding: z.enum(['utf8', 'base64']).default('utf8'),
   startLine: z.number().int().positive().optional().describe('Start line (1-indexed)'),
   endLine: z.number().int().positive().optional().describe('End line (1-indexed, inclusive)'),
 });
 
 export const WriteFileInputSchema = z.object({
-  path: z.string().min(1).describe('Absolute or relative path to write'),
+  path: safePath.describe('Absolute or relative path to write'),
   content: z.string().describe('File content to write'),
   createDirectories: z.boolean().default(true).describe('Create parent directories if missing'),
   encoding: z.enum(['utf8', 'base64']).default('utf8'),
@@ -56,6 +62,13 @@ export const PrintTreeInputSchema = z.object({
   directory: z.string().default('.').describe('Directory to print as a tree'),
   maxDepth: z.number().int().min(1).max(10).default(3),
   maxEntries: z.number().int().min(1).max(500).default(200),
+  includeHidden: z.boolean().default(false),
+});
+
+export const FindFilesInputSchema = z.object({
+  pattern: z.string().min(1).describe('Filename substring or glob-style pattern to match (case-insensitive). E.g. "Dromont", "*.cs", "Controller"'),
+  directory: z.string().default('.').describe('Directory to search in (defaults to workspace root)'),
+  maxResults: z.number().int().positive().default(100),
   includeHidden: z.boolean().default(false),
 });
 
@@ -146,6 +159,7 @@ export type WriteFileInput = z.infer<typeof WriteFileInputSchema>;
 export type RunTerminalInput = z.infer<typeof RunTerminalInputSchema>;
 export type SearchFilesInput = z.infer<typeof SearchFilesInputSchema>;
 export type PrintTreeInput = z.infer<typeof PrintTreeInputSchema>;
+export type FindFilesInput = z.infer<typeof FindFilesInputSchema>;
 export type GitDiffInput = z.infer<typeof GitDiffInputSchema>;
 export type WebFetchInput = z.infer<typeof WebFetchInputSchema>;
 export type GitLogInput = z.infer<typeof GitLogInputSchema>;

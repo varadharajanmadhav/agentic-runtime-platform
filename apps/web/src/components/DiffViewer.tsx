@@ -52,12 +52,12 @@ export function DiffViewer() {
             original: originalText.trim(),
             modified: modifiedText.trim(),
           };
-        } else if (toolName === 'write_to_file' || toolName === 'create_file') {
+        } else if (toolName === 'write_file' || toolName === 'write_to_file' || toolName === 'create_file') {
           diffs[filePath] = {
             tool: toolName,
             timestamp: new Date(e.timestamp),
-            original: '', // New file has no original content
-            modified: input.CodeContent || input.content || '',
+            original: '',
+            modified: input.content || input.CodeContent || '',
           };
         }
       }

@@ -53,7 +53,11 @@ export const users = pgTable('users', {
   metadata: jsonb('metadata').notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index('users_email_idx').on(table.email)]);
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (table) => [
+  index('users_email_idx').on(table.email),
+  index('users_deleted_at_idx').on(table.deletedAt),
+]);
 
 // ── Sessions ───────────────────────────────────────────────────
 export const sessions = pgTable('sessions', {
@@ -65,10 +69,12 @@ export const sessions = pgTable('sessions', {
   metadata: jsonb('metadata').notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (table) => [
   index('sessions_user_id_idx').on(table.userId),
   index('sessions_status_idx').on(table.status),
   index('sessions_created_at_idx').on(table.createdAt),
+  index('sessions_deleted_at_idx').on(table.deletedAt),
 ]);
 
 // ── Messages ───────────────────────────────────────────────────
@@ -112,10 +118,14 @@ export const tasks = pgTable('tasks', {
   completedAt: timestamp('completed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (table) => [
   index('tasks_session_id_idx').on(table.sessionId),
   index('tasks_status_idx').on(table.status),
   index('tasks_created_at_idx').on(table.createdAt),
+  // Composite index for the common "tasks for session, filtered by status" query
+  index('tasks_session_status_idx').on(table.sessionId, table.status),
+  index('tasks_deleted_at_idx').on(table.deletedAt),
 ]);
 
 // ── Agent Events ───────────────────────────────────────────────
@@ -210,6 +220,38 @@ export const policies = pgTable('policies', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index('policies_name_idx').on(table.name)]);
+
+// ── Call Edges (Call Graph) ────────────────────────────────────
+export const callEdges = pgTable('call_edges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceDir: text('workspace_dir').notNull(),
+  filePath: text('file_path').notNull(),
+  callerName: varchar('caller_name', { length: 255 }).notNull(),
+  calleeName: varchar('callee_name', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('call_edges_workspace_idx').on(table.workspaceDir),
+  index('call_edges_file_idx').on(table.filePath),
+  index('call_edges_caller_idx').on(table.callerName),
+  index('call_edges_callee_idx').on(table.calleeName),
+]);
+
+// ── Audit Logs ─────────────────────────────────────────────────
+export const auditLogs = pgTable('audit_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id),
+  action: varchar('action', { length: 100 }).notNull(), // e.g. 'session.delete', 'user.role_change'
+  resourceType: varchar('resource_type', { length: 50 }).notNull(),
+  resourceId: uuid('resource_id'),
+  changes: jsonb('changes').default({}), // { before, after }
+  ipAddress: varchar('ip_address', { length: 45 }),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('audit_logs_user_id_idx').on(table.userId),
+  index('audit_logs_resource_idx').on(table.resourceType, table.resourceId),
+  index('audit_logs_created_at_idx').on(table.createdAt),
+]);
 
 // ── Relations ──────────────────────────────────────────────────
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({

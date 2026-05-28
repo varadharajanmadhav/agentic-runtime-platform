@@ -6,6 +6,7 @@ import { glob } from 'glob';
 import { readFile, writeFile } from 'fs/promises';
 import { resolve, relative, isAbsolute } from 'path';
 import { resolveWorkspaceDir } from '../lib/auth.js';
+import { getDb, workspaceSymbols, callEdges, eq } from '@arp/db';
 
 export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   // POST /api/context/index
@@ -142,6 +143,51 @@ export const contextRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
 
       await writeFile(absolutePath, content, 'utf8');
       return { success: true, message: 'File saved successfully' };
+    } catch (err: any) {
+      return reply.code(500).send({ success: false, error: err.message || String(err) });
+    }
+  });
+
+  // GET /api/context/call-graph
+  fastify.get('/call-graph', async (request, reply) => {
+    const querySchema = z.object({
+      workspaceDir: z.string(),
+    });
+
+    const parsed = querySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ success: false, error: 'Missing or invalid workspaceDir' });
+    }
+
+    const { workspaceDir: requestedDir } = parsed.data;
+    const workspaceDir = await resolveWorkspaceDir(request.user as any, requestedDir);
+    
+    try {
+      const db = getDb();
+      // Fetch all call edges
+      const edges = await db
+        .select()
+        .from(callEdges)
+        .where(eq(callEdges.workspaceDir, workspaceDir));
+        
+      // Fetch all symbols to build node info
+      const symbols = await db
+        .select({
+          id: workspaceSymbols.id,
+          name: workspaceSymbols.name,
+          symbolType: workspaceSymbols.symbolType,
+          filePath: workspaceSymbols.filePath,
+        })
+        .from(workspaceSymbols)
+        .where(eq(workspaceSymbols.workspaceDir, workspaceDir));
+        
+      return {
+        success: true,
+        data: {
+          nodes: symbols,
+          edges: edges,
+        }
+      };
     } catch (err: any) {
       return reply.code(500).send({ success: false, error: err.message || String(err) });
     }

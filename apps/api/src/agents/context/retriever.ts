@@ -3,7 +3,7 @@ import { join, resolve, relative, isAbsolute } from 'path';
 import { existsSync } from 'fs';
 import { simpleGit } from 'simple-git';
 import { getQdrantClient, COLLECTIONS } from '../../lib/qdrant.js';
-import { getDb, workspaceSymbols, eq, inArray, or, like, and } from '@arp/db';
+import { getDb, workspaceSymbols, callEdges, eq, inArray, or, like, and } from '@arp/db';
 import { getModelRouter, embedText } from '@arp/ai';
 import type { ContextItem } from '@arp/shared';
 import { estimateTokenCount } from '@arp/shared';
@@ -208,6 +208,122 @@ export async function retrieveContext(options: RetrieveContextOptions): Promise<
     }
   } catch (err) {
     console.error('[Retriever] File mention retrieval error:', err);
+  }
+
+  // 4. Structural Call Graph Context (Phase 4 Call Graph Traversal)
+  try {
+    const db = getDb();
+    
+    // We look at symbol items that we've already matched
+    const matchedSymbols = contextItems.filter(item => item.type === 'symbol');
+    
+    if (matchedSymbols.length > 0) {
+      const neighborNames = new Set<string>();
+      const neighborRelations = new Map<string, { type: 'caller' | 'callee'; refSymbolName: string }>();
+
+      for (const item of matchedSymbols) {
+        const symbolName = item.metadata?.name;
+        if (typeof symbolName !== 'string' || !symbolName) continue;
+
+        // Query callees (this symbol calls them)
+        const callees = await db
+          .select({ name: callEdges.calleeName })
+          .from(callEdges)
+          .where(
+            and(
+              eq(callEdges.workspaceDir, workspaceDir),
+              eq(callEdges.callerName, symbolName)
+            )
+          );
+
+        for (const c of callees) {
+          if (!neighborNames.has(c.name)) {
+            neighborNames.add(c.name);
+            neighborRelations.set(c.name, { type: 'callee', refSymbolName: symbolName });
+          }
+        }
+
+        // Query callers (they call this symbol)
+        const callers = await db
+          .select({ name: callEdges.callerName })
+          .from(callEdges)
+          .where(
+            and(
+              eq(callEdges.workspaceDir, workspaceDir),
+              eq(callEdges.calleeName, symbolName)
+            )
+          );
+
+        for (const c of callers) {
+          if (!neighborNames.has(c.name)) {
+            neighborNames.add(c.name);
+            neighborRelations.set(c.name, { type: 'caller', refSymbolName: symbolName });
+          }
+        }
+      }
+
+      const namesToFetch = Array.from(neighborNames).filter(name => {
+        // Don't fetch if it is already in our contextItems list
+        return !contextItems.some(item => (item.metadata?.name as string) === name);
+      });
+
+      if (namesToFetch.length > 0) {
+        // Query database to fetch symbol metadata for these neighboring names
+        const fetchedSymbols = await db
+          .select()
+          .from(workspaceSymbols)
+          .where(
+            and(
+              eq(workspaceSymbols.workspaceDir, workspaceDir),
+              inArray(workspaceSymbols.name, namesToFetch)
+            )
+          )
+          .limit(10); // Limit number of neighboring symbols to avoid bloating context
+
+        for (const sym of fetchedSymbols) {
+          const absPath = join(workspaceDir, sym.filePath);
+          if (existsSync(absPath)) {
+            try {
+              const fileContent = await readFile(absPath, 'utf8');
+              const lines = fileContent.split('\n');
+              const startIdx = Math.max(0, sym.startLine - 1);
+              const endIdx = Math.min(lines.length, sym.endLine);
+              const snippet = lines.slice(startIdx, endIdx).join('\n');
+
+              const relation = neighborRelations.get(sym.name);
+              const score = relation?.type === 'callee' ? 0.70 : 0.60;
+              const relationDesc = relation
+                ? (relation.type === 'callee'
+                  ? `Dependency of ${relation.refSymbolName}`
+                  : `Caller of ${relation.refSymbolName}`)
+                : 'Related';
+
+              contextItems.push({
+                id: sym.id,
+                type: 'symbol',
+                content: `// Symbol: ${sym.name} (${sym.symbolType}) [Call Graph: ${relationDesc}]\n// File: ${sym.filePath}\n${snippet}`,
+                path: sym.filePath,
+                relevanceScore: score,
+                tokenCount: estimateTokenCount(snippet),
+                metadata: {
+                  name: sym.name,
+                  symbolType: sym.symbolType,
+                  startLine: sym.startLine,
+                  endLine: sym.endLine,
+                  signature: sym.signature,
+                  structuralRelation: relation?.type,
+                  referencedBy: relation?.refSymbolName,
+                },
+              });
+            } catch (readErr) {
+              // Ignore
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Retriever] Call Graph structural traversal error:', err);
   }
 
   // Sort by relevance score descending

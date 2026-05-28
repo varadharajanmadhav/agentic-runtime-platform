@@ -30,6 +30,8 @@ export interface RouterConfig {
   medium: RouteConfig;
   high: RouteConfig;
   embedding: RouteConfig;
+  maxContextWindow?: number;
+  disableThinking?: boolean;
 }
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -135,6 +137,8 @@ function normalizeConfig(config: Partial<RouterConfig>): Partial<RouterConfig> {
   if (config.medium !== undefined) normalized.medium = normalizeRoute(config.medium, DEFAULT_CONFIG.medium);
   if (config.high !== undefined) normalized.high = normalizeRoute(config.high, DEFAULT_CONFIG.high);
   if (config.embedding !== undefined) normalized.embedding = normalizeRoute(config.embedding, DEFAULT_CONFIG.embedding);
+  if (typeof config.maxContextWindow === 'number') normalized.maxContextWindow = config.maxContextWindow;
+  if (typeof config.disableThinking === 'boolean') normalized.disableThinking = config.disableThinking;
   return normalized;
 }
 
@@ -176,12 +180,27 @@ export class ModelRouter {
   }
 
   getModel(complexity: TaskComplexity): LanguageModel {
-    const route = this.config[complexity];
-    return this.resolveLanguageModel(route.provider, route.model, route.ollamaBaseUrl);
+    try {
+      const route = this.config[complexity];
+      return this.resolveLanguageModel(route.provider, route.model, route.ollamaBaseUrl);
+    } catch (err) {
+      throw new Error(
+        `Failed to initialize model for complexity "${complexity}": ${err instanceof Error ? err.message : String(err)}. ` +
+        `Check your model configuration — the provider may be offline or misconfigured.`,
+      );
+    }
   }
 
   getRoute(complexity: TaskComplexity): RouteConfig {
     return this.config[complexity];
+  }
+
+  getMaxContextWindowConstraint(): number | undefined {
+    return this.config.maxContextWindow;
+  }
+
+  getDisableThinkingConstraint(): boolean | undefined {
+    return this.config.disableThinking;
   }
 
   getEmbeddingModel(): EmbeddingModel<string> {

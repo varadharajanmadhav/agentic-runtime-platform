@@ -52,6 +52,8 @@ interface SettingsConfig {
   keys: {
     ollamaBaseUrl: string;
   };
+  maxContextWindow?: number | null;
+  disableThinking?: boolean;
   availableProviders: string[];
 }
 
@@ -87,8 +89,8 @@ interface AppState {
   indexingProgress: Record<string, { status: string; progressPercent: number }>;
 
   // Theme
-  theme: 'obsidian' | 'nord' | 'matrix' | 'midnight' | 'light-glass' | 'light-nord';
-  setTheme: (theme: 'obsidian' | 'nord' | 'matrix' | 'midnight' | 'light-glass' | 'light-nord') => void;
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
 
   maxSteps: number;
   setMaxSteps: (steps: number) => void;
@@ -105,6 +107,10 @@ interface AppState {
   activeFileLoading: boolean;
   workspaceFiles: string[];
 
+  // Toast / status notification
+  toast: { message: string; type: 'success' | 'error' | 'info' } | null;
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+
   // Authentication
   token: string | null;
   user: { id: string; email: string; name: string; role: string } | null;
@@ -116,7 +122,7 @@ interface AppState {
   fetchSessions: () => Promise<void>;
   createSession: (title: string, workspaceDir?: string) => Promise<Session>;
   setActiveSession: (id: string) => Promise<void>;
-  sendMessage: (sessionId: string, content: string, workspaceDir?: string) => Promise<void>;
+  sendMessage: (sessionId: string, content: string, workspaceDir?: string, displayContent?: string) => Promise<void>;
   setActivePanel: (panel: AppState['activePanel']) => void;
   setActiveRightTab: (tab: AppState['activeRightTab']) => void;
   toggleSidebar: () => void;
@@ -128,7 +134,7 @@ interface AppState {
   
   setSelectedComplexity: (complexity: 'low' | 'medium' | 'high') => void;
   fetchSettings: () => Promise<void>;
-  saveSettings: (models: SettingsConfig['models'], keys: SettingsConfig['keys']) => Promise<{ success: boolean; error?: string }>;
+  saveSettings: (models: SettingsConfig['models'], keys: SettingsConfig['keys'], maxContextWindow?: number | null, disableThinking?: boolean) => Promise<{ success: boolean; error?: string }>;
   cancelActiveTask: () => Promise<void>;
   setActiveTaskId: (id: string) => Promise<void>;
   startIndexing: (workspaceDir: string) => Promise<void>;
@@ -138,9 +144,10 @@ interface AppState {
   saveFileContent: (filePath: string, content: string) => Promise<boolean>;
   fetchWorkspaceFiles: () => Promise<void>;
   connectTaskStream: (taskId: string, sessionId: string) => void;
+  searchSessions: (q: string) => Promise<Array<{ id: string; title: string; workspaceDir: string | null; updatedAt: string; preview?: string }>>;
 }
 
-const apiFetch = async (path: string, options: RequestInit = {}) => {
+export const apiFetch = async (path: string, options: RequestInit = {}) => {
   const token = useAppStore.getState()?.token;
   const headers = {
     ...options.headers,
@@ -171,6 +178,13 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   activePanel: 'chat',
   activeRightTab: 'tasks',
   sidebarOpen: true,
+
+  // Toast notifications
+  toast: null,
+  showToast: (message, type = 'info') => {
+    set({ toast: { message, type } });
+    setTimeout(() => set({ toast: null }), 3500);
+  },
 
   // Authentication
   token: localStorage.getItem('arp_token'),
@@ -244,7 +258,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
   settings: null,
   indexingProgress: {},
 
-  theme: (localStorage.getItem('arp_theme') as any) || 'obsidian',
+  theme: (localStorage.getItem('arp_theme') as any) || 'dark',
   setTheme: (theme) => {
     localStorage.setItem('arp_theme', theme);
     set({ theme });
@@ -417,20 +431,21 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     }
   },
 
-  sendMessage: async (sessionId, content, workspaceDir) => {
+  sendMessage: async (sessionId, content, workspaceDir, displayContent) => {
+    const shownContent = displayContent ?? content;
     // Add user message optimistically
     const userMsg: Message = {
       id: crypto.randomUUID(),
       sessionId,
       role: 'user',
-      content,
+      content: shownContent,
       createdAt: new Date(),
     };
 
     const activeSession = get().sessions.find(s => s.id === sessionId);
     const hasDefaultTitle = activeSession && (
-      activeSession.title === 'New Conversation' || 
-      activeSession.title === 'Draft' || 
+      activeSession.title === 'New Conversation' ||
+      activeSession.title === 'Draft' ||
       activeSession.title.startsWith('New Conversation')
     );
 
@@ -438,8 +453,8 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
       messages: [...state.messages, userMsg],
       isStreaming: true,
       streamingText: '',
-      sessions: hasDefaultTitle ? state.sessions.map(s => 
-        s.id === sessionId ? { ...s, title: cleanTitleFromMessage(content) } : s
+      sessions: hasDefaultTitle ? state.sessions.map(s =>
+        s.id === sessionId ? { ...s, title: cleanTitleFromMessage(shownContent) } : s
       ) : state.sessions
     }));
 
@@ -447,7 +462,7 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
       apiFetch(`${API_URL}/api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: cleanTitleFromMessage(content) }),
+        body: JSON.stringify({ title: cleanTitleFromMessage(shownContent) }),
       }).catch(err => console.error('Failed to update session title', err));
     }
 
@@ -514,12 +529,12 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     }
   },
 
-  saveSettings: async (models, keys) => {
+  saveSettings: async (models, keys, maxContextWindow, disableThinking) => {
     try {
       const res = await apiFetch(`${API_URL}/api/models/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ models, keys }),
+        body: JSON.stringify({ models, keys, maxContextWindow, disableThinking }),
       });
       const json = await res.json();
       if (json.success) {
@@ -547,12 +562,15 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
           isStreaming: false,
           tasks: state.tasks.map(t => t.id === taskId ? updatedTask : t)
         }));
+        get().showToast('Task cancelled successfully', 'info');
       } else {
         set({ isStreaming: false });
+        get().showToast(json.error || 'Failed to cancel task', 'error');
       }
     } catch (err) {
       console.error('Failed to cancel task', err);
       set({ isStreaming: false });
+      get().showToast('Failed to cancel task — network error', 'error');
     }
   },
 
@@ -694,6 +712,17 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
     } catch (err) {
       console.error('Failed to fetch workspace files', err);
       set({ workspaceFiles: [] });
+    }
+  },
+
+  searchSessions: async (q: string) => {
+    if (!q || q.length < 2) return [];
+    try {
+      const res = await apiFetch(`${API_URL}/api/sessions/search?q=${encodeURIComponent(q)}`);
+      const json = await res.json();
+      return json.success ? json.data : [];
+    } catch {
+      return [];
     }
   },
 
@@ -902,7 +931,19 @@ export const useAppStore = create<AppState>()(subscribeWithSelector((set, get) =
         return;
       }
 
-      // All other events (tool_result, context_assembled, etc.)
+      // context_assembled fires right before streamText — use it to signal that we're now generating
+      if (type === 'context_assembled') {
+        set(state => {
+          const nextEvents = isDuplicate ? state.events : [...state.events, agentEvent];
+          return {
+            tasks: state.tasks.map(t => t.id === taskId ? { ...t, status: 'executing' } : t),
+            events: nextEvents,
+          };
+        });
+        return;
+      }
+
+      // All other events (tool_result, plan_created, etc.)
       if (!isDuplicate) {
         set(state => ({ events: [...state.events, agentEvent] }));
       }

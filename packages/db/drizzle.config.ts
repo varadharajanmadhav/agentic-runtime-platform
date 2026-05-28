@@ -1,4 +1,9 @@
 import { defineConfig } from 'drizzle-kit';
+import { config } from 'dotenv';
+import { resolve } from 'path';
+
+// Load .env from monorepo root so DATABASE_URL is always available
+config({ path: resolve(process.cwd(), '../../.env') });
 
 export default defineConfig({
   schema: './src/schema/index.ts',

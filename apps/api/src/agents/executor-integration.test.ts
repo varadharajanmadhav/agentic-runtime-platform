@@ -54,6 +54,8 @@ vi.mock('@arp/ai', () => ({
   getModelRouter: () => ({
     getRoute: () => ({ provider: 'ollama', model: 'qwen2.5-coder:7b' }),
     getModel: () => ({}),
+    getMaxContextWindowConstraint: () => undefined,
+    getDisableThinkingConstraint: () => undefined,
   }),
   adaptPrompt: () => ({
     system: 'Adapted System',

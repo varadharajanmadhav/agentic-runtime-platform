@@ -4,7 +4,7 @@ import { readFile, stat } from 'fs/promises';
 import { join, relative, extname } from 'path';
 import { randomUUID, createHash } from 'crypto';
 import { getQdrantClient, COLLECTIONS } from '../../lib/qdrant.js';
-import { getDb, workspaceSymbols, eq, and } from '@arp/db';
+import { getDb, workspaceSymbols, callEdges, eq, and } from '@arp/db';
 import { getModelRouter, embedTexts } from '@arp/ai';
 import { getRedisClient } from '../../lib/redis.js';
 
@@ -53,6 +53,57 @@ export async function setIndexingStatus(workspaceDir: string, progress: Partial<
   } catch (err) {
     console.error('[Indexer] Redis set error:', err);
   }
+}
+
+export interface ExtractedCallEdge {
+  callerName: string;
+  calleeName: string;
+}
+
+export function extractCallEdgesFromTs(filePath: string, fileContent: string): ExtractedCallEdge[] {
+  const sourceFile = ts.createSourceFile(filePath, fileContent, ts.ScriptTarget.Latest, true);
+  const edges: ExtractedCallEdge[] = [];
+  let currentCaller: string | null = null;
+
+  function visit(node: ts.Node) {
+    let previousCaller = currentCaller;
+
+    if (ts.isClassDeclaration(node) && node.name) {
+      currentCaller = node.name.text;
+    } else if (ts.isInterfaceDeclaration(node) && node.name) {
+      currentCaller = node.name.text;
+    } else if (ts.isFunctionDeclaration(node) && node.name) {
+      currentCaller = node.name.text;
+    } else if (ts.isMethodDeclaration(node) && node.name) {
+      const className = node.parent && ts.isClassDeclaration(node.parent) && node.parent.name ? node.parent.name.text : '';
+      const methodName = node.name.getText(sourceFile);
+      currentCaller = className ? `${className}.${methodName}` : methodName;
+    } else if (ts.isConstructorDeclaration(node)) {
+      const className = node.parent && ts.isClassDeclaration(node.parent) && node.parent.name ? node.parent.name.text : '';
+      currentCaller = className ? `${className}.constructor` : 'constructor';
+    }
+
+    if (ts.isCallExpression(node)) {
+      let calleeName = '';
+      if (ts.isIdentifier(node.expression)) {
+        calleeName = node.expression.text;
+      } else if (ts.isPropertyAccessExpression(node.expression)) {
+        calleeName = node.expression.name.text;
+      }
+      if (currentCaller && calleeName) {
+        edges.push({
+          callerName: currentCaller,
+          calleeName: calleeName,
+        });
+      }
+    }
+
+    ts.forEachChild(node, visit);
+    currentCaller = previousCaller;
+  }
+
+  visit(sourceFile);
+  return edges;
 }
 
 // ── Symbol Extraction Parsers ─────────────────────────────────
@@ -406,6 +457,16 @@ export async function indexFile(workspaceDir: string, absolutePath: string, comp
       )
     );
 
+  // Delete existing call edges for this file to prevent duplicates/stale data
+  await db
+    .delete(callEdges)
+    .where(
+      and(
+        eq(callEdges.workspaceDir, workspaceDir),
+        eq(callEdges.filePath, relativePath)
+      )
+    );
+
   if (symbols.length === 0) {
     // Store a placeholder row representing the file itself so its hash is saved and not scanned again
     await db.insert(workspaceSymbols).values({
@@ -481,6 +542,26 @@ export async function indexFile(workspaceDir: string, absolutePath: string, comp
       wait: true,
       points: qdrantPoints,
     });
+  }
+
+  // Extract and save call graph edges for JS/TS files
+  if (['.ts', '.tsx', '.js', '.jsx'].includes(ext)) {
+    try {
+      const edges = extractCallEdgesFromTs(absolutePath, content);
+      const edgeRows = edges.map(e => ({
+        id: randomUUID(),
+        workspaceDir,
+        filePath: relativePath,
+        callerName: e.callerName,
+        calleeName: e.calleeName,
+      }));
+      
+      if (edgeRows.length > 0) {
+        await db.insert(callEdges).values(edgeRows);
+      }
+    } catch (err) {
+      console.error(`[Indexer] Error extracting call edges for ${relativePath}:`, err);
+    }
   }
 }
 

@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import sensible from '@fastify/sensible';
 import websocket from '@fastify/websocket';
+import rateLimit from '@fastify/rate-limit';
 import { sessionRoutes } from './routes/sessions.js';
 import { taskRoutes } from './routes/tasks.js';
 import { streamRoutes } from './routes/stream.js';
@@ -10,9 +11,10 @@ import { toolRoutes } from './routes/tools.js';
 import { healthRoutes } from './routes/health.js';
 import { modelRoutes } from './routes/models.js';
 import { contextRoutes } from './routes/context.js';
-
 import { authRoutes } from './routes/auth.js';
 import { adminRoutes } from './routes/admin.js';
+import { isTokenBlacklisted } from './routes/auth.js';
+import { RATE_LIMIT } from './config/constants.js';
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
@@ -21,25 +23,20 @@ declare module '@fastify/jwt' {
       email: string;
       name: string;
       role: string;
+      jti?: string;
     };
   }
 }
 
 export async function buildApp() {
-  // CR-5: Require a proper JWT secret — fail fast rather than silently using a known default
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret || jwtSecret.length < 16) {
     if (process.env.NODE_ENV === 'production') {
       throw new Error(
-        '[ARP] JWT_SECRET env var must be set and at least 16 characters long in production. ' +
-        'Set it in your .env file.'
+        '[ARP] JWT_SECRET env var must be set and at least 16 characters long in production.',
       );
     }
-    // In development we allow a fallback but warn loudly
-    console.warn(
-      '[ARP] WARNING: JWT_SECRET is not set or too short. ' +
-      'Using an insecure default — DO NOT use this in production.'
-    );
+    console.warn('[ARP] WARNING: JWT_SECRET is not set or too short. Using an insecure default — DO NOT use this in production.');
   }
 
   const app = Fastify({
@@ -66,10 +63,33 @@ export async function buildApp() {
   await app.register(sensible);
   await app.register(websocket);
 
-  // preValidation / onRequest hook to authenticate routes
+  // Rate limiting — tighter limits on auth routes, generous global limit
+  await app.register(rateLimit, {
+    global: true,
+    max: RATE_LIMIT.GLOBAL_MAX,
+    timeWindow: RATE_LIMIT.GLOBAL_WINDOW_MS,
+    keyGenerator: (request) => request.ip,
+    errorResponseBuilder: () => ({
+      success: false,
+      error: 'Too many requests — please slow down.',
+    }),
+  });
+
+  // Auth routes get their own tighter limit
+  app.addHook('onRoute', (routeOptions) => {
+    if (routeOptions.url?.startsWith('/api/auth/login') || routeOptions.url?.startsWith('/api/auth/register')) {
+      routeOptions.config = {
+        ...routeOptions.config,
+        rateLimit: {
+          max: RATE_LIMIT.AUTH_MAX,
+          timeWindow: RATE_LIMIT.AUTH_WINDOW_MS,
+        },
+      };
+    }
+  });
+
   const apiKey = process.env.ARP_API_KEY;
   app.addHook('onRequest', async (request, reply) => {
-    // Exclude health, public routes, and auth (including bootstrap)
     if (
       request.url.startsWith('/health') ||
       request.url.startsWith('/api/auth/') ||
@@ -78,11 +98,10 @@ export async function buildApp() {
       return;
     }
 
-    // Support optional API key auth as fallback (e.g. for simple local testing)
+    // Support optional API key auth
     if (apiKey) {
       const provided = request.headers['x-arp-api-key'];
       if (provided === apiKey) {
-        // If an API key is used, mock as admin
         request.user = {
           userId: '00000000-0000-0000-0000-000000000000',
           email: 'admin@arp.local',
@@ -94,14 +113,24 @@ export async function buildApp() {
     }
 
     try {
-      // Support JWT via query parameter for WebSockets
+      // WebSocket connections pass token in query param (can't set headers on WS)
       if (request.url.includes('/ws') && (request.query as any)?.token) {
-        const decoded = app.jwt.verify((request.query as any).token);
+        const decoded = app.jwt.verify((request.query as any).token) as any;
+        // Check token blacklist
+        if (decoded?.jti && await isTokenBlacklisted(decoded.jti)) {
+          return reply.code(401).send({ success: false, error: 'Token has been revoked' });
+        }
         request.user = decoded as any;
         return;
       }
 
       await request.jwtVerify();
+
+      // Check token blacklist for regular requests
+      const payload = request.user as any;
+      if (payload?.jti && await isTokenBlacklisted(payload.jti)) {
+        return reply.code(401).send({ success: false, error: 'Token has been revoked' });
+      }
     } catch (err) {
       return reply.code(401).send({ success: false, error: 'Unauthorized: invalid or missing JWT token' });
     }

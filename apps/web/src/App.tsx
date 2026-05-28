@@ -107,20 +107,7 @@ export default function App() {
               </div>
               <button 
                 onClick={logout}
-                style={{
-                  background: 'rgba(243, 139, 168, 0.1)',
-                  border: '1px solid rgba(243, 139, 168, 0.2)',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  color: '#f38ba8',
-                  cursor: 'pointer',
-                  fontSize: '11px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  transition: 'background 0.2s',
-                  marginLeft: '8px',
-                }}
+                className="btn-logout"
               >
                 <LogOut size={11} />
                 <span>Logout</span>

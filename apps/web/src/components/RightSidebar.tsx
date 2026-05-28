@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAppStore } from '../store/index.js';
 import { TerminalPanel } from './TerminalPanel.js';
 import { DiffViewer } from './DiffViewer.js';
@@ -111,7 +111,7 @@ export function RightSidebar() {
     activeRightTab, 
   } = useAppStore();
 
-  const [localTab, setLocalTab] = useState<'diffs' | 'terminal' | 'tasks' | 'metrics'>('diffs');
+  const [localTab, setLocalTab] = useState<'diffs' | 'terminal' | 'tasks' | 'metrics'>('tasks');
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState<number>(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -242,25 +242,31 @@ export function RightSidebar() {
   };
   const liveState = getLiveStateLabel();
 
-  // Render Tasks Checklist (replaces Timeline)
+  // Files changed — derived from tool_result events for write/edit tools
+  const filesChanged = useMemo(() => {
+    const seen = new Set<string>();
+    const files: Array<{ path: string; toolName: string }> = [];
+    events.forEach(e => {
+      if (e.type !== 'tool_result') return;
+      const toolName = (e.payload as any)?.toolName ?? '';
+      if (!['write_file', 'edit_file', 'replace_file_content', 'multi_replace_file_content', 'create_file'].includes(toolName)) return;
+      const path: string = (e.payload as any)?.input?.path ?? (e.payload as any)?.input?.TargetFile ?? '';
+      if (path && !seen.has(path)) { seen.add(path); files.push({ path, toolName }); }
+    });
+    return files;
+  }, [events]);
+
+  // Render Tasks Checklist
   const renderTasksChecklist = () => {
     const steps = activeTask?.plan?.steps || [];
-    
-    // Calculate progress metrics
     const completedCount = steps.filter(s => s.status === 'completed').length;
     const totalCount = steps.length;
     const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '12px 0', overflowY: 'auto' }}>
-        {/* Live status & duration */}
-        <div style={{
-          padding: '0 16px 12px 16px',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
+        {/* One-line status row */}
+        <div style={{ padding: '0 16px 12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             {isStreaming ? <PulsingDot color={liveState.color} /> : <Circle size={8} style={{ color: liveState.color, fill: liveState.color }} />}
             <span style={{ fontSize: '11px', fontWeight: 700, color: liveState.color }}>{liveState.label}</span>
@@ -271,98 +277,50 @@ export function RightSidebar() {
         </div>
 
         {activeTask ? (
-          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>
-            {/* Progress bar container */}
-            <div style={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border)',
-              borderRadius: '8px',
-              padding: '12px'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                <span>EXECUTION CHECKLIST</span>
-                <span>{completedCount} / {totalCount} Steps ({progressPercent}%)</span>
+          <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
+            {/* Progress bar */}
+            {totalCount > 0 && (
+              <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px', letterSpacing: '0.04em' }}>
+                  <span>STEPS</span>
+                  <span>{completedCount} / {totalCount} ({progressPercent}%)</span>
+                </div>
+                <div style={{ width: '100%', height: '4px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{ width: `${progressPercent}%`, height: '100%', background: 'linear-gradient(90deg, var(--accent-primary) 0%, #a855f7 100%)', transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1)' }} />
+                </div>
               </div>
-              <div style={{ width: '100%', height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
-                <div style={{
-                  width: `${progressPercent}%`,
-                  height: '100%',
-                  background: 'linear-gradient(90deg, var(--accent-primary) 0%, #a855f7 100%)',
-                  transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
-                }} />
-              </div>
-            </div>
+            )}
 
-            {/* Checklist items list */}
+            {/* Checklist */}
             {steps.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {steps.map((step, idx) => {
-                  const isPending = step.status === 'pending';
                   const isRunning = step.status === 'running';
                   const isCompleted = step.status === 'completed';
                   const isFailed = step.status === 'failed';
                   const isSkipped = step.status === 'skipped';
-
-                  let statusColor = 'var(--text-muted)';
-                  let statusIcon = <Circle size={14} style={{ color: 'var(--border)' }} />;
-                  let bgStyle: React.CSSProperties = {
-                    background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border)'
-                  };
-
+                  let statusIcon = <Circle size={13} style={{ color: 'var(--border)' }} />;
+                  let bgStyle: React.CSSProperties = { background: 'var(--bg-secondary)', border: '1px solid var(--border)' };
                   if (isCompleted) {
-                    statusColor = 'var(--success)';
-                    statusIcon = <CheckCircle size={14} style={{ color: 'var(--success)', fill: 'rgba(16, 185, 129, 0.1)' }} />;
+                    statusIcon = <CheckCircle size={13} style={{ color: 'var(--success)' }} />;
                   } else if (isRunning) {
-                    statusColor = 'var(--accent-primary)';
-                    statusIcon = <Loader2 size={14} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />;
-                    bgStyle = {
-                      background: 'rgba(99, 102, 241, 0.04)',
-                      border: '1px solid rgba(99, 102, 241, 0.25)',
-                      boxShadow: '0 0 12px rgba(99, 102, 241, 0.05)'
-                    };
+                    statusIcon = <Loader2 size={13} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />;
+                    bgStyle = { background: 'rgba(99,102,241,0.04)', border: '1px solid rgba(99,102,241,0.25)' };
                   } else if (isFailed) {
-                    statusColor = 'var(--error)';
-                    statusIcon = <XCircle size={14} style={{ color: 'var(--error)', fill: 'rgba(239, 68, 68, 0.1)' }} />;
-                    bgStyle = {
-                      background: 'rgba(239, 68, 68, 0.03)',
-                      border: '1px solid rgba(239, 68, 68, 0.25)'
-                    };
+                    statusIcon = <XCircle size={13} style={{ color: 'var(--error)' }} />;
+                    bgStyle = { background: 'rgba(239,68,68,0.03)', border: '1px solid rgba(239,68,68,0.25)' };
                   } else if (isSkipped) {
-                    statusColor = 'var(--text-muted)';
-                    statusIcon = <ArrowRight size={14} style={{ color: 'var(--text-muted)' }} />;
+                    statusIcon = <ArrowRight size={13} style={{ color: 'var(--text-muted)' }} />;
                   }
-
                   return (
-                    <div
-                      key={step.id || idx}
-                      style={{
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '10px',
-                        transition: 'all 0.2s ease',
-                        ...bgStyle
-                      }}
-                    >
-                      <div style={{ marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {statusIcon}
-                      </div>
+                    <div key={step.id || idx} style={{ padding: '8px 10px', borderRadius: '6px', display: 'flex', alignItems: 'flex-start', gap: '8px', transition: 'all 0.2s ease', ...bgStyle }}>
+                      <div style={{ marginTop: '1px', flexShrink: 0 }}>{statusIcon}</div>
                       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-                        <span style={{
-                          fontSize: '12px',
-                          fontWeight: isRunning ? 600 : 500,
-                          color: isRunning ? 'var(--text-primary)' : isCompleted || isSkipped ? 'var(--text-muted)' : 'var(--text-secondary)',
-                          textDecoration: isCompleted ? 'line-through' : 'none',
-                          lineHeight: '1.4'
-                        }}>
+                        <span style={{ fontSize: '11px', fontWeight: isRunning ? 600 : 500, color: isRunning ? 'var(--text-primary)' : isCompleted || isSkipped ? 'var(--text-muted)' : 'var(--text-secondary)', textDecoration: isCompleted ? 'line-through' : 'none', lineHeight: '1.4' }}>
                           {step.description}
                         </span>
                         {isFailed && step.error && (
-                          <span style={{ fontSize: '10px', color: 'var(--error)', marginTop: '4px', fontFamily: 'monospace' }}>
-                            Error: {step.error}
-                          </span>
+                          <span style={{ fontSize: '10px', color: 'var(--error)', marginTop: '3px', fontFamily: 'monospace' }}>Error: {step.error}</span>
                         )}
                       </div>
                     </div>
@@ -370,28 +328,40 @@ export function RightSidebar() {
                 })}
               </div>
             ) : (
-              <div style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '48px 24px',
-                color: 'var(--text-muted)',
-                textAlign: 'center',
-                gap: '12px'
-              }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '32px 24px', color: 'var(--text-muted)', textAlign: 'center', gap: '10px' }}>
                 {activeTask.status === 'planning' || activeTask.status === 'queued' ? (
                   <>
-                    <Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
-                    <div style={{ fontSize: '12px', fontWeight: 500 }}>Formulating execution checklist...</div>
+                    <Loader2 size={20} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
+                    <div style={{ fontSize: '11px', fontWeight: 500 }}>Building execution plan...</div>
                   </>
                 ) : (
                   <>
-                    <ListTodo size={24} style={{ color: 'var(--border)' }} />
-                    <div style={{ fontSize: '11px' }}>No plan checklist generated for this task.</div>
+                    <ListTodo size={20} style={{ color: 'var(--border)' }} />
+                    <div style={{ fontSize: '11px' }}>No plan generated for this task.</div>
                   </>
                 )}
+              </div>
+            )}
+
+            {/* Files Changed */}
+            {filesChanged.length > 0 && (
+              <div>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.04em', marginBottom: '6px' }}>
+                  FILES CHANGED ({filesChanged.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  {filesChanged.map((f, i) => {
+                    const isNew = f.toolName === 'create_file';
+                    const fileName = f.path.split(/[/\\]/).pop() ?? f.path;
+                    return (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', borderRadius: '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: '11px', color: isNew ? '#4ade80' : '#34d399', fontWeight: 700, flexShrink: 0 }}>{isNew ? '+' : '●'}</span>
+                        <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{fileName}</span>
+                        <span style={{ fontSize: '9px', color: 'var(--text-muted)', flexShrink: 0 }}>{isNew ? 'created' : 'edited'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -407,9 +377,9 @@ export function RightSidebar() {
   // Render Metrics
   const renderMetrics = () => (
     <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', flex: 1 }}>
-      {/* Token details */}
+      {/* Session totals */}
       <div>
-        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>TOKEN UTILIZATION</div>
+        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>SESSION TOTALS</div>
         <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px' }}>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
             {[
@@ -433,18 +403,52 @@ export function RightSidebar() {
         </div>
       </div>
 
+      {/* Per-turn history */}
+      <div>
+        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>TURN HISTORY ({tasks.length})</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {tasks.length === 0 ? (
+            <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '10.5px' }}>
+              No turns yet.
+            </div>
+          ) : (
+            [...tasks].reverse().map((t, idx) => {
+              const isOk = t.status === 'completed';
+              const isFail = t.status === 'failed' || t.status === 'cancelled';
+              const statusColor = isOk ? 'var(--success)' : isFail ? 'var(--error)' : 'var(--accent-primary)';
+              const tokens = t.totalTokens ?? 0;
+              const cost = t.estimatedCostUsd ?? 0;
+              return (
+                <div key={t.id || idx} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px 10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-primary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '65%' }}>
+                      {t.title || 'Untitled'}
+                    </span>
+                    <span style={{ fontSize: '10px', color: statusColor, fontWeight: 600, flexShrink: 0 }}>{t.status}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                    {tokens > 0 && <span>{tokens.toLocaleString()} tok</span>}
+                    {cost > 0 && <span>${cost.toFixed(4)}</span>}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
       {/* Build Diagnostics list */}
       <div>
-        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>TASK DIAGNOSTICS ({verifications.length})</div>
+        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>BUILD DIAGNOSTICS ({verifications.length})</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           {verifications.length === 0 ? (
             <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '10.5px' }}>
-              No test or build verifications run.
+              No test or build runs.
             </div>
           ) : (
             verifications.map((run, idx) => (
               <div key={idx} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
                   <span style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '70%' }}>
                     $ {run.command}
                   </span>
@@ -474,7 +478,7 @@ export function RightSidebar() {
         }
       `}</style>
       <aside style={{
-        width: '400px',
+        width: '340px',
         background: 'var(--bg-panel)',
         borderLeft: '1px solid var(--border)',
         display: 'flex',

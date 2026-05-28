@@ -1,4 +1,9 @@
 import 'dotenv/config';
+import { validateEnv } from './lib/env.js';
+
+// Validate all required env vars before anything else runs
+validateEnv();
+
 import { buildApp } from './app.js';
 import { initDb, getDb, tasks, sessions, inArray, closeDb } from '@arp/db';
 import { initModelRouter } from '@arp/ai';

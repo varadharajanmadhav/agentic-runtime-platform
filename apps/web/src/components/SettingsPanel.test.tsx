@@ -22,7 +22,7 @@ vi.mock('../store/index.js', () => {
         availableProviders: ['ollama'],
       },
       saveSettings: mockSaveSettings,
-      theme: 'obsidian',
+      theme: 'dark',
       setTheme: mockSetTheme,
       maxSteps: 20,
       setMaxSteps: vi.fn(),
@@ -71,10 +71,10 @@ describe('SettingsPanel Component', () => {
     // Switch to "Appearance Theme" tab
     fireEvent.click(screen.getByText('Appearance Theme'));
 
-    // Find and click "Nord Dark" swatch
-    const nordSwatch = screen.getByText('Nord Dark');
-    fireEvent.click(nordSwatch);
+    // Find and click "Light Mode" swatch
+    const lightSwatch = screen.getByText('Light Mode');
+    fireEvent.click(lightSwatch);
     
-    expect(mockSetTheme).toHaveBeenCalledWith('nord');
+    expect(mockSetTheme).toHaveBeenCalledWith('light');
   });
 });

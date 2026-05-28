@@ -9,6 +9,30 @@ import { retrieveContext } from './context/retriever.js';
 import type { ContextItem, PlanStep } from '@arp/shared';
 import { estimateCostUsd, estimateTokenCount } from '@arp/shared';
 import { randomUUID } from 'crypto';
+import { AGENT } from '../config/constants.js';
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Tool "${label}" timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
+// Detect queries that don't need LLM-based planning or vector context retrieval.
+// Covers: greetings/small talk, short queries without code intent, and any message
+// with attached file context (the file IS the context — no need to vector-search more).
+function isConversationalQuery(description: string): boolean {
+  // Messages with attached files already carry their own context
+  if (/### Attached Files:/i.test(description)) return true;
+  const trimmed = description.trim();
+  if (trimmed.length > 200) return false;
+  const trivialPattern = /^(hi|hello|hey|thanks|thank you|ok|okay|sure|yes|no|bye|what|who|where|when|why|how are you|what can you|what do you|tell me about yourself|help me understand|explain to me)/i;
+  const codeKeywords = /\b(fix|build|test|run|create|write|implement|refactor|debug|deploy|install|configure|add|remove|delete|update|migrate|generate|analyze|review|check|scan|lint|compile|import|export|class|function|method|file|module|package|api|endpoint|schema|database|query|component|hook|route|controller|service|type|interface|enum)\b/i;
+  if (trivialPattern.test(trimmed) && !codeKeywords.test(trimmed)) return true;
+  return trimmed.length < 60 && !codeKeywords.test(trimmed);
+}
 
 export async function executeTask(taskId: string): Promise<void> {
   const db = getDb();
@@ -61,9 +85,16 @@ export async function executeTask(taskId: string): Promise<void> {
     const model = router.getModel(complexity as 'low' | 'medium' | 'high');
     const registry = getToolRegistry();
 
-    // Generate dynamic execution plan steps
-    try {
-      const planPrompt = `You are a planning module for an AI coding assistant.
+    // Generate dynamic execution plan steps (skip for trivial/conversational queries)
+    const skipPlanning = isConversationalQuery(description);
+    if (!skipPlanning) {
+      try {
+        // Strip attached file blocks — planning only needs the user's intent, not file contents
+        const planDescription = description
+          .replace(/\n\n### Attached Files:[\s\S]*/i, '')
+          .slice(0, 500)
+          .trim();
+        const planPrompt = `You are a planning module for an AI coding assistant.
 Analyze the following user task and break it down into 3 to 5 logical, high-level steps for an execution checklist.
 Provide the output strictly as a JSON array of objects, with no explanation and no markdown block formatting.
 Each object must have the following fields:
@@ -71,28 +102,28 @@ Each object must have the following fields:
 - "description": a concise explanation of what the step aims to accomplish (max 80 chars)
 - "status": "pending"
 
-Task: "${description}"
+Task: "${planDescription}"
 
 JSON Array:`;
 
-      const planRes = await generateText({
-        model,
-        prompt: planPrompt,
-        maxTokens: 500,
-        temperature: 0.1,
-      });
+        const planRes = await withTimeout(
+          generateText({ model, prompt: planPrompt, maxTokens: 500, temperature: 0.1 }),
+          30_000,
+          'plan_generation',
+        );
 
-      const cleanText = planRes.text.trim().replace(/^```json\s*|```$/g, '');
-      const parsed = JSON.parse(cleanText);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        steps = parsed.map((item, idx) => ({
-          id: String(item.id || `step-${idx}`),
-          description: String(item.description || 'Executing step'),
-          status: idx === 0 ? 'running' : 'pending',
-        }));
+        const cleanText = planRes.text.trim().replace(/^```json\s*|```$/g, '');
+        const parsed = JSON.parse(cleanText);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          steps = parsed.map((item, idx) => ({
+            id: String(item.id || `step-${idx}`),
+            description: String(item.description || 'Executing step'),
+            status: idx === 0 ? 'running' : 'pending',
+          }));
+        }
+      } catch (err) {
+        console.warn('[Executor] Plan generation failed or timed out. Falling back to default checklist.', err);
       }
-    } catch (err) {
-      console.warn('[Executor] Plan generation failed or timed out. Falling back to default checklist.', err);
     }
 
     if (steps.length === 0) {
@@ -136,13 +167,17 @@ JSON Array:`;
           emitTaskEvent(taskId, sessionId, 'tool_called', { toolName: t.name, input });
           await saveEvent(taskId, sessionId, 'tool_called', { toolName: t.name, input });
 
-          const result = await registry.execute(t.name, input, {
-            taskId,
-            sessionId,
-            workspaceDir: workspaceDir ?? undefined,
-            provider: route.provider,
-            model: route.model,
-          });
+          const result = await withTimeout(
+            registry.execute(t.name, input, {
+              taskId,
+              sessionId,
+              workspaceDir: workspaceDir ?? undefined,
+              provider: route.provider,
+              model: route.model,
+            }),
+            AGENT.TOOL_TIMEOUT_MS,
+            t.name,
+          );
 
           const durationMs = Date.now() - start;
 
@@ -183,45 +218,88 @@ JSON Array:`;
             }
           }
 
-          return result.output;
+          let finalOutput = result.output;
+          if (typeof finalOutput === 'string') {
+            const maxChars = 16000; // ~4000 tokens
+            if (finalOutput.length > maxChars) {
+              finalOutput = finalOutput.slice(0, maxChars) + '\n\n... [Tool output truncated to save context space]';
+            }
+          } else if (finalOutput !== null && finalOutput !== undefined) {
+            const strOutput = JSON.stringify(finalOutput);
+            const maxChars = 16000;
+            if (strOutput.length > maxChars) {
+              finalOutput = strOutput.slice(0, maxChars) + '\n\n... [Tool output JSON truncated to save context space]';
+            }
+          }
+
+          return finalOutput;
         },
       }) as any;
     }
 
-    // Compile prompt with context retrieval
-    if (workspaceDir) {
+    // Context retrieval — skip for conversational queries, cap at 10s for others
+    if (workspaceDir && !skipPlanning) {
       try {
-        contextItems = await retrieveContext({
-          query: description,
-          workspaceDir,
-        });
+        contextItems = await withTimeout(
+          retrieveContext({ query: description, workspaceDir }),
+          10_000,
+          'context_retrieval',
+        );
         console.log(`[Executor] Retrieved ${contextItems.length} context items for task.`);
       } catch (ctxErr) {
-        console.error('[Executor] Error retrieving context:', ctxErr);
+        console.warn('[Executor] Context retrieval skipped (timed out or errored):', (ctxErr as Error).message);
       }
     }
+
+    // Build conversation history, summarizing old turns if the session is long
+    const conversationHistory = await (async () => {
+      try {
+        const recentMessages = await db
+          .select()
+          .from(messages)
+          .where(eq(messages.sessionId, sessionId))
+          .orderBy(desc(messages.createdAt))
+          .limit(30);
+        const history = recentMessages
+          .reverse()
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+        // If history is long, summarize the oldest half to save context tokens
+        if (history.length > 16 && !skipPlanning) {
+          const oldTurns = history.slice(0, Math.floor(history.length / 2));
+          const recent = history.slice(Math.floor(history.length / 2));
+          try {
+            const summaryRes = await withTimeout(
+              generateText({
+                model,
+                prompt: `Summarize the following conversation history in 3-5 sentences, preserving key decisions, file paths, and code context:\n\n${oldTurns.map(m => `${m.role}: ${m.content.slice(0, 500)}`).join('\n')}`,
+                maxTokens: 300,
+                temperature: 0,
+              }),
+              20_000,
+              'history_summarization',
+            );
+            return [
+              { role: 'user' as const, content: `[Previous conversation summary]: ${summaryRes.text}` },
+              { role: 'assistant' as const, content: 'Understood. Continuing from where we left off.' },
+              ...recent,
+            ];
+          } catch {
+            return history.slice(-10);
+          }
+        }
+        return history;
+      } catch (histErr) {
+        console.warn('[Executor] Could not load conversation history:', histErr);
+        return [];
+      }
+    })();
 
     const compiled = compilePrompt({
       taskDescription: description,
       contextItems,
-      // M-13: Load recent conversation history so the agent has context of prior turns
-      conversationHistory: await (async () => {
-        try {
-          const recentMessages = await db
-            .select()
-            .from(messages)
-            .where(eq(messages.sessionId, sessionId))
-            .orderBy(desc(messages.createdAt))
-            .limit(10);
-          return recentMessages
-            .reverse()
-            .filter(m => m.role === 'user' || m.role === 'assistant')
-            .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-        } catch (histErr) {
-          console.warn('[Executor] Could not load conversation history:', histErr);
-          return [];
-        }
-      })(),
+      conversationHistory,
       availableToolNames: toolList.map(t => t.name),
       provider: route.provider,
       model: route.model,
@@ -259,14 +337,31 @@ JSON Array:`;
 
     let streamError: Error | null = null;
 
+    // Stall timeout: abort if no token arrives (stuck connection).
+    // Resets on every token, so slow-but-streaming models are never killed.
+    const streamAbort = new AbortController();
+    const STALL_MS = process.env.STREAM_STALL_TIMEOUT_MS 
+      ? parseInt(process.env.STREAM_STALL_TIMEOUT_MS, 10) 
+      : 600_000; // Default to 10 minutes to allow slow local models/hardware to load and process prompts
+    const stallMinutes = Math.round(STALL_MS / 60_000);
+    let lastTokenAt = Date.now();
+    let stallTimer = setTimeout(() => streamAbort.abort(new Error(`Stream stalled — no token received for ${stallMinutes} minutes`)), STALL_MS);
+
+    const resetStallTimer = () => {
+      lastTokenAt = Date.now();
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => streamAbort.abort(new Error(`Stream stalled — no token received for ${stallMinutes} minutes`)), STALL_MS);
+    };
+
     const { textStream, usage } = streamText({
       model,
       system: compiled.system,
       messages: compiled.messages,
       tools: toolsObj,
-      maxSteps: 20,
+      maxSteps: AGENT.MAX_STEPS,
       maxTokens: (route as any).maxTokens,
       maxRetries: 0,
+      abortSignal: streamAbort.signal,
       onError: ({ error }) => {
         streamError = error instanceof Error ? error : new Error(
           typeof error === 'object' && error !== null
@@ -277,17 +372,27 @@ JSON Array:`;
       onChunk: ({ chunk }) => {
         if (chunk.type === 'text-delta') {
           fullText += chunk.textDelta;
+          resetStallTimer();
           emitTaskEvent(taskId, sessionId, 'token_chunk', { text: chunk.textDelta });
         }
       },
     });
 
-    // Drain stream
-    for await (const _ of textStream) {
-      const [currentTask] = await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
-      if (currentTask?.status === 'cancelled') {
-        throw new Error('Task was cancelled by user');
+    // Drain stream — check cancellation every 2s, not every token
+    let lastCancelCheck = Date.now();
+    try {
+      for await (const _ of textStream) {
+        const now = Date.now();
+        if (now - lastCancelCheck >= 2000) {
+          lastCancelCheck = now;
+          const [currentTask] = await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+          if (currentTask?.status === 'cancelled') {
+            throw new Error('Task was cancelled by user');
+          }
+        }
       }
+    } finally {
+      clearTimeout(stallTimer);
     }
 
     if (streamError) {

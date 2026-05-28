@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useAppStore } from '../store/index.js';
-import { formatDistanceToNow } from 'date-fns';
-import { 
-  Folder, 
+import { formatDistanceToNow, isToday, isYesterday, differenceInCalendarDays } from 'date-fns';
+import {
+  Folder,
   File,
-  Plus, 
-  RefreshCw, 
-  Settings, 
+  Plus,
+  RefreshCw,
+  Settings,
   ChevronRight,
   ChevronDown,
   Sparkles,
@@ -14,7 +14,8 @@ import {
   Trash2,
   Check,
   X,
-  Users
+  Users,
+  Search,
 } from 'lucide-react';
 
 interface Project {
@@ -25,11 +26,11 @@ interface Project {
 
 
 export function Sidebar() {
-  const { 
-    sessions, 
-    activeSessionId, 
-    setActiveSession, 
-    createSession, 
+  const {
+    sessions,
+    activeSessionId,
+    setActiveSession,
+    createSession,
     loadingSessions,
     indexingProgress,
     startIndexing,
@@ -38,6 +39,7 @@ export function Sidebar() {
     deleteSession,
     updateSessionTitle,
     user,
+    searchSessions,
   } = useAppStore();
   const isAdmin = user?.role === 'admin';
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -55,6 +57,10 @@ export function Sidebar() {
   const [showAddProject, setShowAddProject] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
   const [confirmingDeleteProject, setConfirmingDeleteProject] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Array<{ id: string; title: string; workspaceDir: string | null; updatedAt: string; preview?: string }>>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleDeleteProject = async (projectPath: string) => {
     const projectSessions = sessions.filter(s => s.workspaceDir === projectPath);
@@ -64,6 +70,22 @@ export function Sidebar() {
     setUserProjects(prev => prev.filter(p => p !== projectPath));
     setConfirmingDeleteProject(null);
   };
+
+  // Debounced backend search when query >= 2 chars
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!searchQuery.trim() || searchQuery.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    setSearchLoading(true);
+    searchDebounceRef.current = setTimeout(async () => {
+      const results = await searchSessions(searchQuery.trim());
+      setSearchResults(results);
+      setSearchLoading(false);
+    }, 350);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [searchQuery]);
 
   useEffect(() => {
     localStorage.setItem('arp_user_projects', JSON.stringify(userProjects));
@@ -108,9 +130,15 @@ export function Sidebar() {
   const projects = getProjects();
   const activeSession = sessions.find(s => s.id === activeSessionId);
 
+  const filteredSessions = useMemo(() => {
+    if (!searchQuery.trim()) return sessions;
+    const q = searchQuery.toLowerCase();
+    return sessions.filter(s => s.title.toLowerCase().includes(q));
+  }, [sessions, searchQuery]);
+
   return (
     <aside style={{
-      width: '260px',
+      width: '240px',
       background: 'var(--bg-panel)',
       borderRight: '1px solid var(--border)',
       display: 'flex',
@@ -161,21 +189,63 @@ export function Sidebar() {
         </button>
       </div>
 
+      {/* Search */}
+      <div style={{ padding: '6px 12px 4px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <Search size={12} style={{ position: 'absolute', left: 8, color: searchLoading ? 'var(--accent-primary)' : 'var(--text-muted)', pointerEvents: 'none' }} />
+          <input
+            className="input-base"
+            placeholder="Search conversations..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{ width: '100%', fontSize: '12px', padding: '5px 8px 5px 26px' }}
+          />
+          {searchQuery && (
+            <button onClick={() => { setSearchQuery(''); setSearchResults([]); }} style={{ position: 'absolute', right: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 2 }}>
+              <X size={10} />
+            </button>
+          )}
+        </div>
+        {/* Search results dropdown */}
+        {searchQuery.length >= 2 && (
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {searchLoading && (
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '4px 4px' }}>Searching...</div>
+            )}
+            {!searchLoading && searchResults.length === 0 && (
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '4px 4px' }}>No results</div>
+            )}
+            {searchResults.map(r => (
+              <button
+                key={r.id}
+                onClick={async () => { await setActiveSession(r.id); setSearchQuery(''); setSearchResults([]); }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', background: r.id === activeSessionId ? 'rgba(99,102,241,0.08)' : 'var(--bg-secondary)', border: '1px solid var(--border)', borderLeft: r.id === activeSessionId ? '2px solid var(--accent-primary)' : '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', cursor: 'pointer', transition: 'background 0.1s' }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
+                {r.preview && (
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>{r.preview}</div>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Main projects list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
         
         {/* Projects header */}
-        <div style={{ 
-          padding: '8px 8px 4px', 
-          fontSize: '12px', 
-          fontWeight: 600, 
-          color: 'var(--text-secondary)', 
-          display: 'flex', 
+        <div style={{
+          padding: '8px 8px 4px',
+          fontSize: '11px',
+          fontWeight: 500,
+          color: 'var(--text-muted)',
+          display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Folder size={14} style={{ opacity: 0.8 }} /> Projects
+            <Folder size={13} style={{ opacity: 0.6 }} /> PROJECTS
           </span>
           <button 
             onClick={() => setShowAddProject(!showAddProject)}
@@ -222,7 +292,7 @@ export function Sidebar() {
         ) : (
           <div>
             {projects.map(project => {
-              const projectSessions = sessions.filter(s => s.workspaceDir === project.path);
+              const projectSessions = filteredSessions.filter(s => s.workspaceDir === project.path);
               const isCollapsed = collapsedProjects[project.path] ?? false;
 
               return (
@@ -420,159 +490,123 @@ export function Sidebar() {
                     )}
                   </div>
 
-                  {/* Conversations under project */}
-                  {!isCollapsed && (
-                    <div style={{ paddingLeft: '16px', marginTop: '2px' }}>
-                      {projectSessions.length === 0 ? (
-                        <div style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: '11px' }}>
-                          No conversations
+                  {/* Conversations under project — grouped by recency */}
+                  {!isCollapsed && (() => {
+                    if (projectSessions.length === 0) {
+                      return (
+                        <div style={{ paddingLeft: '16px', marginTop: '2px' }}>
+                          <div style={{ padding: '8px 12px', color: 'var(--text-muted)', fontSize: '11px' }}>No conversations</div>
                         </div>
-                      ) : (
-                        projectSessions.map(session => (
-                          <div
-                            key={session.id}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              background: activeSessionId === session.id ? 'var(--bg-hover)' : 'transparent',
-                              borderRadius: '6px',
-                              padding: '6px 12px',
-                              cursor: 'pointer',
-                              marginBottom: '2px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              position: 'relative',
-                            }}
-                            className="session-row"
-                            onClick={() => {
-                              if (editingSessionId !== session.id) {
-                                if (activeSessionId !== session.id) {
-                                  setActiveSession(session.id);
-                                } else if (activePanel !== 'chat') {
-                                  setActivePanel('chat');
+                      );
+                    }
+                    const groups: Array<{ label: string; sessions: typeof projectSessions }> = [];
+                    const today: typeof projectSessions = [];
+                    const yesterday: typeof projectSessions = [];
+                    const week: typeof projectSessions = [];
+                    const older: typeof projectSessions = [];
+                    projectSessions.forEach(s => {
+                      const d = new Date(s.updatedAt);
+                      if (isToday(d)) today.push(s);
+                      else if (isYesterday(d)) yesterday.push(s);
+                      else if (differenceInCalendarDays(new Date(), d) <= 7) week.push(s);
+                      else older.push(s);
+                    });
+                    if (today.length)     groups.push({ label: 'TODAY',        sessions: today });
+                    if (yesterday.length) groups.push({ label: 'YESTERDAY',    sessions: yesterday });
+                    if (week.length)      groups.push({ label: 'PAST 7 DAYS',  sessions: week });
+                    if (older.length)     groups.push({ label: 'OLDER',        sessions: older });
+
+                    const renderSession = (session: typeof projectSessions[0]) => (
+                      <div
+                        key={session.id}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          background: activeSessionId === session.id ? 'rgba(99, 102, 241, 0.06)' : 'transparent',
+                          borderLeft: activeSessionId === session.id ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                          borderRadius: '0 6px 6px 0',
+                          paddingLeft: activeSessionId === session.id ? '10px' : '12px',
+                          paddingRight: '12px',
+                          paddingTop: '6px',
+                          paddingBottom: '6px',
+                          cursor: 'pointer',
+                          marginBottom: '2px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          position: 'relative',
+                        }}
+                        className="session-row"
+                        onClick={() => {
+                          if (editingSessionId !== session.id) {
+                            if (activeSessionId !== session.id) {
+                              setActiveSession(session.id);
+                            } else if (activePanel !== 'chat') {
+                              setActivePanel('chat');
+                            }
+                          }
+                        }}
+                      >
+                        {editingSessionId === session.id ? (
+                          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }} onClick={e => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={editingTitle}
+                              onChange={e => setEditingTitle(e.target.value)}
+                              onKeyDown={async e => {
+                                if (e.key === 'Enter') {
+                                  if (editingTitle.trim()) await updateSessionTitle(session.id, editingTitle.trim());
+                                  setEditingSessionId(null);
+                                } else if (e.key === 'Escape') {
+                                  setEditingSessionId(null);
                                 }
-                              }
-                            }}
-                          >
-                            {/* Left part: Title & Time, or Input field */}
-                            {editingSessionId === session.id ? (
-                              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '4px' }} onClick={e => e.stopPropagation()}>
-                                <input
-                                  type="text"
-                                  value={editingTitle}
-                                  onChange={e => setEditingTitle(e.target.value)}
-                                  onKeyDown={async e => {
-                                    if (e.key === 'Enter') {
-                                      if (editingTitle.trim()) {
-                                        await updateSessionTitle(session.id, editingTitle.trim());
-                                      }
-                                      setEditingSessionId(null);
-                                    } else if (e.key === 'Escape') {
-                                      setEditingSessionId(null);
-                                    }
-                                  }}
-                                  autoFocus
-                                  style={{
-                                    fontSize: '13px',
-                                    color: 'var(--text-primary)',
-                                    background: 'var(--bg-primary)',
-                                    border: '1px solid var(--accent-primary)',
-                                    borderRadius: '4px',
-                                    padding: '2px 6px',
-                                    width: '100%',
-                                    outline: 'none',
-                                  }}
-                                />
-                                <button
-                                  onClick={async () => {
-                                    if (editingTitle.trim()) {
-                                      await updateSessionTitle(session.id, editingTitle.trim());
-                                    }
-                                    setEditingSessionId(null);
-                                  }}
-                                  style={{ background: 'transparent', border: 'none', color: '#10b981', cursor: 'pointer', display: 'flex', padding: '2px' }}
-                                >
-                                  <Check size={14} />
-                                </button>
-                                <button
-                                  onClick={() => setEditingSessionId(null)}
-                                  style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', padding: '2px' }}
-                                >
-                                  <X size={14} />
-                                </button>
-                              </div>
-                            ) : (
-                              <>
-                                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-                                  <span style={{ fontSize: '13px', color: 'var(--text-primary)', textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                                    {session.title}
-                                  </span>
-                                  <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                                    {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true })}
-                                  </span>
-                                </div>
-                                
-                                {/* Hover Action Controls */}
-                                <div 
-                                  className="session-actions"
-                                  style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: '6px',
-                                    marginLeft: '8px',
-                                    opacity: 0,
-                                    transition: 'opacity 0.15s ease',
-                                  }}
-                                  onClick={e => e.stopPropagation()}
-                                >
-                                  <button
-                                    onClick={() => {
-                                      setEditingSessionId(session.id);
-                                      setEditingTitle(session.title);
-                                    }}
-                                    style={{
-                                      background: 'transparent',
-                                      border: 'none',
-                                      color: 'var(--text-secondary)',
-                                      cursor: 'pointer',
-                                      padding: '2px',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                    }}
-                                    title="Rename Conversation"
-                                    className="hover-action-btn"
-                                  >
-                                    <Pencil size={12} />
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      await deleteSession(session.id);
-                                    }}
-                                    style={{
-                                      background: 'transparent',
-                                      border: 'none',
-                                      color: 'var(--text-secondary)',
-                                      cursor: 'pointer',
-                                      padding: '2px',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                    }}
-                                    title="Delete Conversation"
-                                    className="hover-action-btn-red"
-                                  >
-                                    <Trash2 size={12} />
-                                  </button>
-                                </div>
-                              </>
-                            )}
+                              }}
+                              autoFocus
+                              style={{ fontSize: '13px', color: 'var(--text-primary)', background: 'var(--bg-primary)', border: '1px solid var(--accent-primary)', borderRadius: '4px', padding: '2px 6px', width: '100%', outline: 'none' }}
+                            />
+                            <button onClick={async () => { if (editingTitle.trim()) await updateSessionTitle(session.id, editingTitle.trim()); setEditingSessionId(null); }} style={{ background: 'transparent', border: 'none', color: '#10b981', cursor: 'pointer', display: 'flex', padding: '2px' }}>
+                              <Check size={14} />
+                            </button>
+                            <button onClick={() => setEditingSessionId(null)} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', padding: '2px' }}>
+                              <X size={14} />
+                            </button>
                           </div>
-                        ))
-                      )}
-                    </div>
-                  )}
+                        ) : (
+                          <>
+                            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                              <span style={{ fontSize: '12px', color: 'var(--text-primary)', textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                                {session.title}
+                              </span>
+                              <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true })}
+                              </span>
+                            </div>
+                            <div className="session-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '8px', opacity: 0, transition: 'opacity 0.15s ease' }} onClick={e => e.stopPropagation()}>
+                              <button onClick={() => { setEditingSessionId(session.id); setEditingTitle(session.title); }} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Rename" className="hover-action-btn">
+                                <Pencil size={12} />
+                              </button>
+                              <button onClick={async () => { await deleteSession(session.id); }} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Delete" className="hover-action-btn-red">
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+
+                    return (
+                      <div style={{ paddingLeft: '16px', marginTop: '2px' }}>
+                        {groups.map(group => (
+                          <div key={group.label}>
+                            <div style={{ padding: '6px 12px 2px', fontSize: '9px', fontWeight: 600, letterSpacing: '0.08em', color: 'var(--text-muted)', opacity: 0.6 }}>
+                              {group.label}
+                            </div>
+                            {group.sessions.map(renderSession)}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
